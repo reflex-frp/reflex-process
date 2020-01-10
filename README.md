@@ -1,5 +1,7 @@
-reflex-process
+reflex-process 
 ==============
+
+[![hackage](https://img.shields.io/hackage/v/reflex-process.svg)](https://hackage.haskell.org/package/reflex-process) [![hackage-ci](https://matrix.hackage.haskell.org/api/v2/packages/reflex-process/badge)](https://matrix.hackage.haskell.org/#/package/reflex-process) [![travis-ci](https://api.travis-ci.org/reflex-frp/reflex-process.svg?branch=develop)](https://travis-ci.org/reflex-frp/reflex-process)
 
 Functional-reactive shell commands
 ----------------------------------
