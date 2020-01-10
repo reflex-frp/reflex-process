@@ -29,7 +29,7 @@ library
 
 executable readme
   main-is: README.lhs
-  ghc-options: -threaded -pgmL markdown-unlit
+  ghc-options: -threaded -optL -q
   build-depends: base
                , containers >= 0.5 && < 0.7
                , data-default
