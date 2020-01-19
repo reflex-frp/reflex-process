@@ -1,5 +1,9 @@
 # Revision history for reflex-process
 
+##
+
+* Generalise input and output parameters of createRedirectedProcess
+
 ## 0.1.0.1
 
 * Loosen reflex-vty version bounds

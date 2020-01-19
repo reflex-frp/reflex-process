@@ -29,20 +29,20 @@ import System.Process hiding (createProcess)
 import Reflex
 
 -- | The inputs to a process
-data ProcessConfig t = ProcessConfig
-  { _processConfig_stdin :: Event t ByteString
+data ProcessConfig t i = ProcessConfig
+  { _processConfig_stdin :: Event t i
   -- ^ "stdin" input to be fed to the process
   , _processConfig_signal :: Event t P.Signal
   -- ^ Signals to send to the process
   }
 
-instance Reflex t => Default (ProcessConfig t) where
+instance Reflex t => Default (ProcessConfig t i) where
   def = ProcessConfig never never
 
 -- | The output of a process
-data Process t = Process
+data Process t o = Process
   { _process_handle :: P.ProcessHandle
-  , _process_stdout :: Event t ByteString
+  , _process_stdout :: Event t o
   -- ^ Fires whenever there's some new stdout output. Depending on the buffering strategy of the implementation, this could be anything from whole lines to individual characters.
   , _process_stderr :: Event t ByteString
   -- ^ Fires whenever there's some new stderr output. See note on '_process_stdout'.
@@ -59,20 +59,22 @@ data Process t = Process
 -- to those pipes.
 createRedirectedProcess
   :: (MonadIO m, TriggerEvent t m, PerformEvent t m, MonadIO (Performable m))
-  => (Handle -> IO (ByteString -> IO ()))
+  => (Handle -> IO (i -> IO ()))
   -- ^ Builder for the stdin handler
+  -> (Handle -> (o -> IO ()) -> IO (IO ()))
+  -- ^ Builder for stdout
   -> (Handle -> (ByteString -> IO ()) -> IO (IO ()))
-  -- ^ Builder for the stdout and stderr handlers
+  -- ^ Builder for the stderr handlers
   -> CreateProcess
-  -> ProcessConfig t
-  -> m (Process t)
-createRedirectedProcess mkWriteInput mkReadOutput p (ProcessConfig input signal) = do
+  -> ProcessConfig t i
+  -> m (Process t o)
+createRedirectedProcess mkWriteInput mkStdOutput mkErrOutput p (ProcessConfig input signal) = do
   let redirectedProc = p
         { std_in = CreatePipe
         , std_out = CreatePipe
         , std_err = CreatePipe
         }
-  po@(mi, mout, merr, ph) <- liftIO $ P.createProcess redirectedProc 
+  po@(mi, mout, merr, ph) <- liftIO $ P.createProcess redirectedProc
   case (mi, mout, merr) of
     (Just hIn, Just hOut, Just hErr) -> do
       writeInput <- liftIO $ mkWriteInput hIn
@@ -85,17 +87,23 @@ createRedirectedProcess mkWriteInput mkReadOutput p (ProcessConfig input signal)
             P.signalProcess sig pid >> return (Just sig)
       let output h = do
             (e, trigger) <- newTriggerEvent
-            reader <- liftIO $ mkReadOutput h trigger
+            reader <- liftIO $ mkStdOutput h trigger
+            t <- liftIO $ forkIO reader
+            return (e, t)
+
+      let err_output h = do
+            (e, trigger) <- newTriggerEvent
+            reader <- liftIO $ mkErrOutput h trigger
             t <- liftIO $ forkIO reader
             return (e, t)
       (out, outThread) <- output hOut
-      (err, errThread) <- output hErr
+      (err, errThread) <- err_output hErr
       (ecOut, ecTrigger) <- newTriggerEvent
       void $ liftIO $ forkIO $ waitForProcess ph >>= \ec -> mask_ $ do
         ecTrigger ec
         P.cleanupProcess po
         killThread outThread
-        killThread errThread 
+        killThread errThread
       return $ Process
         { _process_exit = ecOut
         , _process_stdout = out
@@ -116,9 +124,9 @@ createRedirectedProcess mkWriteInput mkReadOutput p (ProcessConfig input signal)
 createProcess
   :: (MonadIO m, TriggerEvent t m, PerformEvent t m, MonadIO (Performable m))
   => CreateProcess
-  -> ProcessConfig t
-  -> m (Process t)
-createProcess = createRedirectedProcess input output
+  -> ProcessConfig t ByteString
+  -> m (Process t ByteString)
+createProcess = createRedirectedProcess input output output
   where
     input h = do
       H.hSetBuffering h H.NoBuffering
