@@ -11,7 +11,16 @@ let
 
   perPlatform = lib.genAttrs systems (system: let
     reflex-platform = reflex-platform-fun { inherit system; };
-  in reflex-platform.ghc.callCabal2nix "reflex-process" ./. {});
+    src = builtins.filterSource (path: type: !(builtins.elem (baseNameOf path) [
+      "release.nix"
+      ".git"
+      "dist"
+      "dist-newstyle"
+      "cabal.haskell-ci"
+      "cabal.project"
+      ".travis.yml"
+    ])) ./.;
+  in reflex-platform.ghc.callCabal2nix "reflex-process" src {});
 
 in perPlatform // {
   cache = native-reflex-platform.pinBuildInputs
