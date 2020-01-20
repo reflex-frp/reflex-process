@@ -1,6 +1,6 @@
 # Revision history for reflex-process
 
-##
+## Unreleased
 
 * Generalise input and output parameters of createRedirectedProcess
 
