@@ -51,8 +51,9 @@ data Process t o e = Process
   -- ^ Fires when a signal has actually been sent to the process (via '_processConfig_signal').
   }
 
--- | Runs a process and uses the given input and output handler functions
--- to interact with the process. Used to implement 'createProcess'.
+-- | Runs a process and uses the given input and output handler functions to
+-- interact with the process via the standard streams. Used to implement
+-- 'createProcess'.
 --
 -- NB: The 'std_in', 'std_out', and 'std_err' parameters of the
 -- provided 'CreateProcess' are replaced with new pipes and all output is redirected
@@ -60,15 +61,15 @@ data Process t o e = Process
 createRedirectedProcess
   :: (MonadIO m, TriggerEvent t m, PerformEvent t m, MonadIO (Performable m))
   => (Handle -> IO (i -> IO ()))
-  -- ^ Builder for the stdin handler
+  -- ^ Builder for the standard input handler
   -> (Handle -> (o -> IO ()) -> IO (IO ()))
-  -- ^ Builder for stdout
+  -- ^ Builder for the standard output handler
   -> (Handle -> (e -> IO ()) -> IO (IO ()))
-  -- ^ Builder for the stderr handlers
+  -- ^ Builder for the standard error handler
   -> CreateProcess
   -> ProcessConfig t i
   -> m (Process t o e)
-createRedirectedProcess mkWriteInput mkStdOutput mkErrOutput p (ProcessConfig input signal) = do
+createRedirectedProcess mkWriteStdInput mkReadStdOutput mkReadStdError p (ProcessConfig input signal) = do
   let redirectedProc = p
         { std_in = CreatePipe
         , std_out = CreatePipe
@@ -77,7 +78,7 @@ createRedirectedProcess mkWriteInput mkStdOutput mkErrOutput p (ProcessConfig in
   po@(mi, mout, merr, ph) <- liftIO $ P.createProcess redirectedProc
   case (mi, mout, merr) of
     (Just hIn, Just hOut, Just hErr) -> do
-      writeInput <- liftIO $ mkWriteInput hIn
+      writeInput <- liftIO $ mkWriteStdInput hIn
       performEvent_ $ liftIO . writeInput <$> input
       sigOut <- performEvent $ ffor signal $ \sig -> liftIO $ do
         mpid <- P.getPid ph
@@ -87,13 +88,13 @@ createRedirectedProcess mkWriteInput mkStdOutput mkErrOutput p (ProcessConfig in
             P.signalProcess sig pid >> return (Just sig)
       let output h = do
             (e, trigger) <- newTriggerEvent
-            reader <- liftIO $ mkStdOutput h trigger
+            reader <- liftIO $ mkReadStdOutput h trigger
             t <- liftIO $ forkIO reader
             return (e, t)
 
       let err_output h = do
             (e, trigger) <- newTriggerEvent
-            reader <- liftIO $ mkErrOutput h trigger
+            reader <- liftIO $ mkReadStdError h trigger
             t <- liftIO $ forkIO reader
             return (e, t)
       (out, outThread) <- output hOut
