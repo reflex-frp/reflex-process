@@ -24,6 +24,6 @@ let
 
 in perPlatform // {
   cache = native-reflex-platform.pinBuildInputs
-    "reflex-platform-everywhere"
+    "reflex-process-everywhere"
     (builtins.attrValues perPlatform);
 }
