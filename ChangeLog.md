@@ -1,5 +1,9 @@
 # Revision history for reflex-process
 
+## Unreleased
+
+* Breaking change: Generalise input and output parameters of createRedirectedProcess. Existing programs should replace `Process t` with `Process t ByteString ByteString` and `ProcessConfig t` with `ProcessConfig t ByteString`.
+
 ## 0.1.0.1
 
 * Loosen reflex-vty version bounds
