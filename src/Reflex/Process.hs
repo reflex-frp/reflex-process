@@ -40,11 +40,11 @@ instance Reflex t => Default (ProcessConfig t i) where
   def = ProcessConfig never never
 
 -- | The output of a process
-data Process t o = Process
+data Process t o e = Process
   { _process_handle :: P.ProcessHandle
   , _process_stdout :: Event t o
   -- ^ Fires whenever there's some new stdout output. Depending on the buffering strategy of the implementation, this could be anything from whole lines to individual characters.
-  , _process_stderr :: Event t ByteString
+  , _process_stderr :: Event t e
   -- ^ Fires whenever there's some new stderr output. See note on '_process_stdout'.
   , _process_exit :: Event t ExitCode
   , _process_signal :: Event t P.Signal
@@ -63,11 +63,11 @@ createRedirectedProcess
   -- ^ Builder for the stdin handler
   -> (Handle -> (o -> IO ()) -> IO (IO ()))
   -- ^ Builder for stdout
-  -> (Handle -> (ByteString -> IO ()) -> IO (IO ()))
+  -> (Handle -> (e -> IO ()) -> IO (IO ()))
   -- ^ Builder for the stderr handlers
   -> CreateProcess
   -> ProcessConfig t i
-  -> m (Process t o)
+  -> m (Process t o e)
 createRedirectedProcess mkWriteInput mkStdOutput mkErrOutput p (ProcessConfig input signal) = do
   let redirectedProc = p
         { std_in = CreatePipe
@@ -125,7 +125,7 @@ createProcess
   :: (MonadIO m, TriggerEvent t m, PerformEvent t m, MonadIO (Performable m))
   => CreateProcess
   -> ProcessConfig t ByteString
-  -> m (Process t ByteString)
+  -> m (Process t ByteString ByteString)
 createProcess = createRedirectedProcess input output output
   where
     input h = do
