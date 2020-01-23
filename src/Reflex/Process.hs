@@ -141,12 +141,13 @@ createProcess = createRedirectedProcess input output output
       H.hSetBuffering h H.LineBuffering
       let go = do
             open <- H.hIsOpen h
-            readable <- H.hIsReadable h
-            when (open && readable) $ do
-              out <- BS.hGetSome h 32768
-              if BS.null out
-                then return ()
-                else do
-                  void $ trigger out
-                  go
+            when open $ do
+              readable <- H.hIsReadable h
+              when readable $ do
+                out <- BS.hGetSome h 32768
+                if BS.null out
+                  then return ()
+                  else do
+                    void $ trigger out
+                    go
       return go
