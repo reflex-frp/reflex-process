@@ -1,5 +1,9 @@
 # Revision history for reflex-process
 
+## 0.2.1.0
+
+* `createProcess`: Ensure that handle is open before attempting to check whether it is readable
+
 ## 0.2.0.0
 
 * Breaking change: Generalise input and output parameters of createRedirectedProcess. Existing programs should replace `Process t` with `Process t ByteString ByteString` and `ProcessConfig t` with `ProcessConfig t ByteString`.
