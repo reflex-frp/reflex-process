@@ -112,7 +112,7 @@ createRedirectedProcess mkWriteStdInput mkReadStdOutput mkReadStdError p (Proces
         , _process_signal = fmapMaybe id sigOut
         , _process_handle = ph
         }
-    _ -> error "Reflex.Vty.Process.createRedirectedProcess: Created pipes were not returned by System.Process.createProcess."
+    _ -> error "Reflex.Process.createRedirectedProcess: Created pipes were not returned by System.Process.createProcess."
 
 -- | Run a shell process, feeding it input using an 'Event' and exposing its output
 -- 'Event's representing the process exit code, stdout and stderr.
