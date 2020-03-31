@@ -4,6 +4,8 @@ Description: Run interactive shell commands in reflex
 -}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE GADTs #-}
+{-# LANGUAGE ScopedTypeVariables #-}
+
 module Reflex.Process
   ( createProcess
   , createRedirectedProcess
@@ -11,7 +13,7 @@ module Reflex.Process
   , ProcessConfig(..)
   ) where
 
-import Control.Concurrent (forkIO, killThread)
+import Control.Concurrent (forkIO, killThread, ThreadId)
 import Control.Exception (mask_)
 import Control.Monad (void, when)
 import Control.Monad.IO.Class (MonadIO, liftIO)
@@ -25,6 +27,9 @@ import System.Exit (ExitCode)
 import qualified System.Posix.Signals as P
 import qualified System.Process as P
 import System.Process hiding (createProcess)
+import Control.Concurrent.STM.TChan
+import Control.Concurrent.STM
+import Data.Function
 
 import Reflex
 
@@ -34,10 +39,15 @@ data ProcessConfig t i = ProcessConfig
   -- ^ "stdin" input to be fed to the process
   , _processConfig_signal :: Event t P.Signal
   -- ^ Signals to send to the process
+  , _processConfig_createProcessMethod
+    :: P.CreateProcess -> IO (Maybe Handle, Maybe Handle, Maybe Handle, ProcessHandle)
+  -- ^ Used for dependency injection (for example to ensure, in the test suite,
+  -- that the child process is properly terminated). Defaults to
+  -- 'System.Process.createProcess'
   }
 
 instance Reflex t => Default (ProcessConfig t i) where
-  def = ProcessConfig never never
+  def = ProcessConfig never never P.createProcess
 
 -- | The output of a process
 data Process t o e = Process
@@ -59,7 +69,7 @@ data Process t o e = Process
 -- provided 'CreateProcess' are replaced with new pipes and all output is redirected
 -- to those pipes.
 createRedirectedProcess
-  :: (MonadIO m, TriggerEvent t m, PerformEvent t m, MonadIO (Performable m))
+  :: forall t m i o e. (MonadIO m, TriggerEvent t m, PerformEvent t m, MonadIO (Performable m))
   => (Handle -> IO (i -> IO ()))
   -- ^ Builder for the standard input handler
   -> (Handle -> (o -> IO ()) -> IO (IO ()))
@@ -69,30 +79,35 @@ createRedirectedProcess
   -> CreateProcess
   -> ProcessConfig t i
   -> m (Process t o e)
-createRedirectedProcess mkWriteStdInput mkReadStdOutput mkReadStdError p (ProcessConfig input signal) = do
+createRedirectedProcess mkWriteStdInput mkReadStdOutput mkReadStdError p (ProcessConfig input signal createProcessFunction) = do
   let redirectedProc = p
         { std_in = CreatePipe
         , std_out = CreatePipe
         , std_err = CreatePipe
         }
-  po@(mi, mout, merr, ph) <- liftIO $ P.createProcess redirectedProc
+  po@(mi, mout, merr, ph) <- liftIO $ createProcessFunction redirectedProc
   case (mi, mout, merr) of
+    -- (Just hIn, Just hOut, Just hErr) -> flip finally (putStrLn "theEnd?") $ do
     (Just hIn, Just hOut, Just hErr) -> do
-      writeInput <- liftIO $ mkWriteStdInput hIn
+      writeInput :: i -> IO () <- liftIO $ mkWriteStdInput hIn
       performEvent_ $ liftIO . writeInput <$> input
-      sigOut <- performEvent $ ffor signal $ \sig -> liftIO $ do
+      sigOut :: Event t (Maybe P.Signal) <- performEvent $ ffor signal $ \sig -> liftIO $ do
         mpid <- P.getPid ph
         case mpid of
           Nothing -> return Nothing
           Just pid -> do
             P.signalProcess sig pid >> return (Just sig)
-      let output h = do
+      let
+          output :: Handle -> m (Event t o, ThreadId)
+          output h = do
             (e, trigger) <- newTriggerEvent
             reader <- liftIO $ mkReadStdOutput h trigger
             t <- liftIO $ forkIO reader
             return (e, t)
 
-      let err_output h = do
+      let
+          err_output :: Handle -> m (Event t e, ThreadId)
+          err_output h = do
             (e, trigger) <- newTriggerEvent
             reader <- liftIO $ mkReadStdError h trigger
             t <- liftIO $ forkIO reader
@@ -100,11 +115,13 @@ createRedirectedProcess mkWriteStdInput mkReadStdOutput mkReadStdError p (Proces
       (out, outThread) <- output hOut
       (err, errThread) <- err_output hErr
       (ecOut, ecTrigger) <- newTriggerEvent
-      void $ liftIO $ forkIO $ waitForProcess ph >>= \ec -> mask_ $ do
-        ecTrigger ec
-        P.cleanupProcess po
-        killThread outThread
-        killThread errThread
+      void $ liftIO $ forkIO $ do
+        waited <- waitForProcess ph
+        mask_ $ do
+          ecTrigger waited
+          P.cleanupProcess po
+          killThread outThread
+          killThread errThread
       return $ Process
         { _process_exit = ecOut
         , _process_stdout = out
@@ -127,16 +144,21 @@ createProcess
   => CreateProcess
   -> ProcessConfig t ByteString
   -> m (Process t ByteString ByteString)
-createProcess = createRedirectedProcess input output output
-  where
+createProcess p processConfig = do
+  channel <- liftIO newTChanIO
+
+  let
     input h = do
       H.hSetBuffering h H.NoBuffering
-      let go b = do
-            open <- H.hIsOpen h
-            when open $ do
-              writable <- H.hIsWritable h
-              when writable $ Char8.hPutStrLn h b
-      return go
+      void $ liftIO $ forkIO $ fix $ \loop -> do
+        newMessage <- atomically $ readTChan channel
+        open <- H.hIsOpen h
+        when open $ do
+          writable <- H.hIsWritable h
+          when writable $ do
+            Char8.hPutStrLn h newMessage
+            loop
+      return (liftIO . atomically . writeTChan channel)
     output h trigger = do
       H.hSetBuffering h H.LineBuffering
       let go = do
@@ -151,3 +173,5 @@ createProcess = createRedirectedProcess input output output
                     void $ trigger out
                     go
       return go
+
+  createRedirectedProcess input output output p processConfig
