@@ -13,7 +13,7 @@ module Reflex.Process
   , ProcessConfig(..)
   ) where
 
-import Control.Concurrent (forkIO, killThread, ThreadId)
+import Control.Concurrent (forkIO, ThreadId)
 import Control.Exception (mask_)
 import Control.Monad (void, when)
 import Control.Monad.IO.Class (MonadIO, liftIO)
@@ -120,8 +120,6 @@ createRedirectedProcess mkWriteStdInput mkReadStdOutput mkReadStdError p (Proces
         mask_ $ do
           ecTrigger waited
           P.cleanupProcess po
-          killThread outThread
-          killThread errThread
       return $ Process
         { _process_exit = ecOut
         , _process_stdout = out
