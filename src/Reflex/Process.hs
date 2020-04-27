@@ -39,7 +39,7 @@ data ProcessConfig t i = ProcessConfig
   -- ^ "stdin" input to be fed to the process
   , _processConfig_signal :: Event t P.Signal
   -- ^ Signals to send to the process
-  , _processConfig_createProcessMethod
+  , _processConfig_createProcess
     :: P.CreateProcess -> IO (Maybe Handle, Maybe Handle, Maybe Handle, ProcessHandle)
   -- ^ Used for dependency injection (for example to ensure, in the test suite,
   -- that the child process is properly terminated). Defaults to
