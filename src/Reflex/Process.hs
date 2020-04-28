@@ -87,7 +87,6 @@ createRedirectedProcess mkWriteStdInput mkReadStdOutput mkReadStdError p (Proces
         }
   po@(mi, mout, merr, ph) <- liftIO $ createProcessFunction redirectedProc
   case (mi, mout, merr) of
-    -- (Just hIn, Just hOut, Just hErr) -> flip finally (putStrLn "theEnd?") $ do
     (Just hIn, Just hOut, Just hErr) -> do
       writeInput :: i -> IO () <- liftIO $ mkWriteStdInput hIn
       performEvent_ $ liftIO . writeInput <$> input
