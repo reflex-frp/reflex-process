@@ -18,6 +18,7 @@ tested-with: GHC ==8.6.5
 library
   exposed-modules: Reflex.Process
   build-depends: base >=4.12 && <4.14
+               , async
                , bytestring >=0.10 && < 0.11
                , data-default >= 0.7.1 && < 0.8
                , process >= 1.6.4 && < 1.7

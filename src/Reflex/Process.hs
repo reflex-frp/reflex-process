@@ -13,23 +13,24 @@ module Reflex.Process
   , ProcessConfig(..)
   ) where
 
-import Control.Concurrent (forkIO, killThread, ThreadId)
+import Control.Concurrent (forkIO)
+import Control.Concurrent.Async (async, cancel, Async)
+import Control.Concurrent.STM (newTChanIO, readTChan, writeTChan, atomically)
 import Control.Exception (mask_)
 import Control.Monad (void, when)
 import Control.Monad.IO.Class (MonadIO, liftIO)
 import Data.ByteString (ByteString)
-import qualified Data.ByteString as BS
-import qualified Data.ByteString.Char8 as Char8
-import Data.Default
-import qualified GHC.IO.Handle as H
+import Data.Default (Default (..))
+import Data.Function (fix)
+import Data.IORef (IORef, newIORef, readIORef, writeIORef)
 import GHC.IO.Handle (Handle)
 import System.Exit (ExitCode)
+import System.Process hiding (createProcess)
+import qualified Data.ByteString as BS
+import qualified Data.ByteString.Char8 as Char8
+import qualified GHC.IO.Handle as H
 import qualified System.Posix.Signals as P
 import qualified System.Process as P
-import System.Process hiding (createProcess)
-import Control.Concurrent.STM.TChan
-import Control.Concurrent.STM
-import Data.Function
 
 import Reflex
 
@@ -72,9 +73,9 @@ createRedirectedProcess
   :: forall t m i o e. (MonadIO m, TriggerEvent t m, PerformEvent t m, MonadIO (Performable m))
   => (Handle -> IO (i -> IO ()))
   -- ^ Builder for the standard input handler
-  -> (Handle -> (o -> IO ()) -> IO (IO ()))
+  -> (Handle -> IORef Bool -> (o -> IO ()) -> IO (IO ()))
   -- ^ Builder for the standard output handler
-  -> (Handle -> (e -> IO ()) -> IO (IO ()))
+  -> (Handle -> IORef Bool -> (e -> IO ()) -> IO (IO ()))
   -- ^ Builder for the standard error handler
   -> CreateProcess
   -> ProcessConfig t i
@@ -86,6 +87,7 @@ createRedirectedProcess mkWriteStdInput mkReadStdOutput mkReadStdError p (Proces
         , std_err = CreatePipe
         }
   po@(mi, mout, merr, ph) <- liftIO $ createProcessFunction redirectedProc
+  processFinished :: IORef Bool <- liftIO $ newIORef False
   case (mi, mout, merr) of
     (Just hIn, Just hOut, Just hErr) -> do
       writeInput :: i -> IO () <- liftIO $ mkWriteStdInput hIn
@@ -97,19 +99,19 @@ createRedirectedProcess mkWriteStdInput mkReadStdOutput mkReadStdError p (Proces
           Just pid -> do
             P.signalProcess sig pid >> return (Just sig)
       let
-          output :: Handle -> m (Event t o, ThreadId)
+          output :: Handle -> m (Event t o, Async ())
           output h = do
             (e, trigger) <- newTriggerEvent
-            reader <- liftIO $ mkReadStdOutput h trigger
-            t <- liftIO $ forkIO reader
+            reader <- liftIO $ mkReadStdOutput h processFinished trigger
+            t <- liftIO $ async reader
             return (e, t)
 
       let
-          err_output :: Handle -> m (Event t e, ThreadId)
+          err_output :: Handle -> m (Event t e, Async ())
           err_output h = do
             (e, trigger) <- newTriggerEvent
-            reader <- liftIO $ mkReadStdError h trigger
-            t <- liftIO $ forkIO reader
+            reader <- liftIO $ mkReadStdError h processFinished trigger
+            t <- liftIO $ async reader
             return (e, t)
       (out, outThread) <- output hOut
       (err, errThread) <- err_output hErr
@@ -117,10 +119,11 @@ createRedirectedProcess mkWriteStdInput mkReadStdOutput mkReadStdError p (Proces
       void $ liftIO $ forkIO $ do
         waited <- waitForProcess ph
         mask_ $ do
+          writeIORef processFinished True
           ecTrigger waited
+          cancel outThread
+          cancel errThread
           P.cleanupProcess po
-          killThread outThread
-          killThread errThread
       return $ Process
         { _process_exit = ecOut
         , _process_stdout = out
@@ -158,16 +161,20 @@ createProcess p processConfig = do
             Char8.hPutStrLn h newMessage
             loop
       return (liftIO . atomically . writeTChan channel)
-    output h trigger = do
+    output h processFinished trigger = do
       H.hSetBuffering h H.LineBuffering
       let go = do
             open <- H.hIsOpen h
             when open $ do
               readable <- H.hIsReadable h
               when readable $ do
-                out <- BS.hGetSome h 32768
+                out <- BS.hGetNonBlocking h 32768
                 if BS.null out
-                  then return ()
+                  then do
+                    closeHandle <- readIORef processFinished
+                    if closeHandle
+                    then H.hClose h
+                    else go
                   else do
                     void $ trigger out
                     go
