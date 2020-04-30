@@ -175,8 +175,8 @@ createProcessBufferingInput readBuffer writeBuffer p procConfig = do
       return go
   createRedirectedProcess input output output p procConfig
 
--- | Create a process process, feeding it input using an 'Event' and exposing its output
--- 'Event's representing the process exit code, stdout and stderr.
+-- | Create a process feeding it input using an 'Event' and exposing its output
+-- 'Event's representing the process exit code, stdout, and stderr.
 --
 -- The @stdout@ and @stderr@ 'Handle's are line-buffered.
 --
