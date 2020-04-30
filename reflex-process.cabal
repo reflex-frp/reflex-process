@@ -63,4 +63,3 @@ test-suite tests
     reflex,
     reflex-process,
     unix
-  other-modules: HeadlessHost
