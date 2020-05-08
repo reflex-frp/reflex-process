@@ -14,7 +14,7 @@ import System.Timeout (timeout)
 import qualified Data.ByteString.Char8 as BS
 import qualified System.Process as P
 
-import HeadlessHost
+import Reflex.Host.Headless
 import Reflex.Process
 import Test.Hspec
 

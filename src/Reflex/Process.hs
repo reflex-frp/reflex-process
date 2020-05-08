@@ -8,28 +8,27 @@ Description: Run interactive shell commands in reflex
 
 module Reflex.Process
   ( createProcess
+  , createProcessBufferingInput
   , createRedirectedProcess
   , Process(..)
   , ProcessConfig(..)
   ) where
 
-import Control.Concurrent (forkIO)
 import Control.Concurrent.Async (async, cancel, Async)
-import Control.Concurrent.STM (newTChanIO, readTChan, writeTChan, atomically)
+import Control.Concurrent.Chan (newChan, readChan, writeChan)
 import Control.Exception (mask_)
 import Control.Monad (void, when)
 import Control.Monad.IO.Class (MonadIO, liftIO)
 import Data.ByteString (ByteString)
+import qualified Data.ByteString as BS
 import Data.Default (Default (..))
 import Data.Function (fix)
 import Data.IORef (IORef, newIORef, readIORef, writeIORef)
 import GHC.IO.Handle (Handle)
-import System.Exit (ExitCode)
-import System.Process hiding (createProcess)
-import qualified Data.ByteString as BS
-import qualified Data.ByteString.Char8 as Char8
 import qualified GHC.IO.Handle as H
+import System.Exit (ExitCode)
 import qualified System.Posix.Signals as P
+import System.Process hiding (createProcess)
 import qualified System.Process as P
 
 import Reflex
@@ -116,7 +115,7 @@ createRedirectedProcess mkWriteStdInput mkReadStdOutput mkReadStdError p (Proces
       (out, outThread) <- output hOut
       (err, errThread) <- err_output hErr
       (ecOut, ecTrigger) <- newTriggerEvent
-      void $ liftIO $ forkIO $ do
+      void $ liftIO $ async $ do
         waited <- waitForProcess ph
         mask_ $ do
           writeIORef processFinished True
@@ -133,34 +132,35 @@ createRedirectedProcess mkWriteStdInput mkReadStdOutput mkReadStdError p (Proces
         }
     _ -> error "Reflex.Process.createRedirectedProcess: Created pipes were not returned by System.Process.createProcess."
 
--- | Run a shell process, feeding it input using an 'Event' and exposing its output
--- 'Event's representing the process exit code, stdout and stderr.
+-- | Create a process feeding it input using an 'Event' and exposing its output with 'Event's
+-- for its exit code, stdout, and stderr. The input is fed via a buffer represented by a
+-- reading action and a writing action.
 --
--- The input 'Handle' is not buffered and the output 'Handle's are line-buffered.
+-- The @stdout@ and @stderr@ 'Handle's are line-buffered.
 --
 -- NB: The 'std_in', 'std_out', and 'std_err' parameters of the
 -- provided 'CreateProcess' are replaced with new pipes and all output is redirected
 -- to those pipes.
-createProcess
+createProcessBufferingInput
   :: (MonadIO m, TriggerEvent t m, PerformEvent t m, MonadIO (Performable m))
-  => CreateProcess
-  -> ProcessConfig t ByteString
+  => IO ByteString -- ^ Read a value from the input stream buffer
+  -> (ByteString -> IO ()) -- ^ Write a value to the input stream buffer
+  -> CreateProcess -- ^ The process specification
+  -> ProcessConfig t ByteString -- ^ The process configuration in terms of Reflex
   -> m (Process t ByteString ByteString)
-createProcess p processConfig = do
-  channel <- liftIO newTChanIO
-
+createProcessBufferingInput readBuffer writeBuffer p procConfig = do
   let
     input h = do
       H.hSetBuffering h H.NoBuffering
-      void $ liftIO $ forkIO $ fix $ \loop -> do
-        newMessage <- atomically $ readTChan channel
+      void $ liftIO $ async $ fix $ \loop -> do
+        newMessage <- readBuffer
         open <- H.hIsOpen h
         when open $ do
           writable <- H.hIsWritable h
           when writable $ do
-            Char8.hPutStrLn h newMessage
+            BS.hPutStr h newMessage
             loop
-      return (liftIO . atomically . writeTChan channel)
+      return writeBuffer
     output h processFinished trigger = do
       H.hSetBuffering h H.LineBuffering
       let go = do
@@ -179,5 +179,24 @@ createProcess p processConfig = do
                     void $ trigger out
                     go
       return go
+  createRedirectedProcess input output output p procConfig
 
-  createRedirectedProcess input output output p processConfig
+-- | Create a process feeding it input using an 'Event' and exposing its output
+-- 'Event's representing the process exit code, stdout, and stderr.
+--
+-- The @stdout@ and @stderr@ 'Handle's are line-buffered.
+--
+-- N.B. The process input is buffered with an unbounded channel! For more control of this,
+-- use 'createProcessBufferingInput' directly.
+--
+-- NB: The 'std_in', 'std_out', and 'std_err' parameters of the
+-- provided 'CreateProcess' are replaced with new pipes and all output is redirected
+-- to those pipes.
+createProcess
+  :: (MonadIO m, TriggerEvent t m, PerformEvent t m, MonadIO (Performable m))
+  => CreateProcess
+  -> ProcessConfig t ByteString
+  -> m (Process t ByteString ByteString)
+createProcess p procConfig = do
+  channel <- liftIO newChan
+  createProcessBufferingInput (readChan channel) (writeChan channel) p procConfig
