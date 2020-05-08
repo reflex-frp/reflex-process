@@ -7,7 +7,18 @@ let
   inherit (native-reflex-platform.nixpkgs) lib;
 
   perPlatform = lib.genAttrs supportedSystems (system: let
-    reflex-platform = reflex-platform-fun { inherit system; };
+    reflex-platform = reflex-platform-fun {
+      inherit system;
+      haskellOverlaysPost = [
+        (self: super: {
+          reflex = self.callHackageDirect {
+            pkg = "reflex";
+            ver = "0.7.1.0";
+            sha256 = "0a933xz7yl931m90bbwi9akfz77q6px36grlx6wba55mn1klpn27";
+          } {};
+        })
+      ];
+    };
     src = builtins.filterSource (path: type: !(builtins.elem (baseNameOf path) [
       "release.nix"
       ".git"
