@@ -16,6 +16,12 @@ let
             ver = "0.7.1.0";
             sha256 = "0a933xz7yl931m90bbwi9akfz77q6px36grlx6wba55mn1klpn27";
           } {};
+
+          reflex-vty = self.callHackageDirect {
+            pkg = "reflex-vty";
+            ver = "0.1.4.0";
+            sha256 = "0djs7y4mmkb2q5hvp1fr1gn81k08hzab8v3c6qvh7nyn1fdh8zvh";
+          } {};
         })
       ];
     };
