@@ -41,3 +41,12 @@ The following example uses [reflex-vty](https://github.com/reflex-frp/reflex-vty
 >     stretch $ text $ T.decodeUtf8 <$> current stdout
 >   pure $ () <$ exit
 ```
+
+Developer environment
+---------------------
+
+You can get `ghcid` running for working on the code with the command:
+```
+nix-shell -E '((import ./reflex-platform {}).ghc.callCabal2nix "reflex-process" ./. {}).env' --run ghcid
+```
+
