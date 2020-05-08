@@ -12,6 +12,7 @@ module Reflex.Process
   , createRedirectedProcess
   , Process(..)
   , ProcessConfig(..)
+  , SendPipe (..)
   ) where
 
 import Control.Concurrent (forkIO, killThread, ThreadId)

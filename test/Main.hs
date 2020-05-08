@@ -60,11 +60,11 @@ checkFRPBlocking downstreamProcess exitMVar = do
       timer <- tickLossyFromPostBuildTime 1
       void $ performEvent $ (liftIO $ tryPutMVar exitMVar Exit) <$ timer
 
-      (ev, evTrigger :: ByteString -> IO ()) <- newTriggerEvent
+      (ev, evTrigger :: SendPipe ByteString -> IO ()) <- newTriggerEvent
       processOutput <- createProcess downstreamProcess (ProcessConfig ev never createProcessWithTermination)
-      liftIO $ evTrigger $ veryLongByteString 'a'
-      liftIO $ evTrigger $ veryLongByteString 'b'
-      liftIO $ evTrigger $ veryLongByteString 'c'
+      liftIO $ evTrigger $ SendPipe_Message $ veryLongByteString 'a'
+      liftIO $ evTrigger $ SendPipe_Message $ veryLongByteString 'b'
+      liftIO $ evTrigger $ SendPipe_LastMessage $ veryLongByteString 'c'
 
       void $ performEvent $ liftIO . BS.putStrLn <$> (_process_stdout processOutput)
       pure never)
