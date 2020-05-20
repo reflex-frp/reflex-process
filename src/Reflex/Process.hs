@@ -67,6 +67,8 @@ data Process t o e = Process
   , _process_stderr :: Event t e
   -- ^ Fires whenever there's some new stderr output. See note on '_process_stdout'.
   , _process_exit :: Event t ExitCode
+  -- ^ Fires when the process is over and no @stdout@ or @stderr@ data is left.
+  -- Once this fires, no other 'Event's for the process will fire again.
   , _process_signal :: Event t P.Signal
   -- ^ Fires when a signal has actually been sent to the process (via '_processConfig_signal').
   }
@@ -114,15 +116,15 @@ createRedirectedProcess mkWriteStdInput mkReadStdOutput mkReadStdError p (Proces
           t <- liftIO $ async reader
           return (e, t)
 
-        err_output :: Handle -> m (Event t e, Async ())
-        err_output h = do
+        errOutput :: Handle -> m (Event t e, Async ())
+        errOutput h = do
           (e, trigger) <- newTriggerEvent
           reader <- liftIO $ mkReadStdError h trigger
           t <- liftIO $ async reader
           return (e, t)
 
       (out, outThread) <- output hOut
-      (err, errThread) <- err_output hErr
+      (err, errThread) <- errOutput hErr
       (ecOut, ecTrigger) <- newTriggerEvent
       void $ liftIO $ async $ flip finally (P.cleanupProcess po) $ do
         waited <- waitForProcess ph
