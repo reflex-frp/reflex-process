@@ -45,7 +45,7 @@ data SendPipe i
 
 -- | The inputs to a process
 data ProcessConfig t i = ProcessConfig
-  { _processConfig_stdin :: Event t (SendPipe i)
+  { _processConfig_stdin :: Event t i
   -- ^ "stdin" input to be fed to the process
   , _processConfig_signal :: Event t P.Signal
   -- ^ Signals to send to the process
@@ -80,7 +80,7 @@ data Process t o e = Process
 -- to those pipes.
 createRedirectedProcess
   :: forall t m i o e. (MonadIO m, TriggerEvent t m, PerformEvent t m, MonadIO (Performable m))
-  => (Handle -> IO (SendPipe i -> IO ()))
+  => (Handle -> IO (i -> IO ()))
   -- ^ Builder for the standard input handler
   -> (Handle -> (o -> IO ()) -> IO (IO ()))
   -- ^ Builder for the standard output handler
@@ -98,7 +98,7 @@ createRedirectedProcess mkWriteStdInput mkReadStdOutput mkReadStdError p (Proces
   po@(mi, mout, merr, ph) <- liftIO $ createProcessFunction redirectedProc
   case (mi, mout, merr) of
     (Just hIn, Just hOut, Just hErr) -> do
-      writeInput :: SendPipe i -> IO () <- liftIO $ mkWriteStdInput hIn
+      writeInput :: i -> IO () <- liftIO $ mkWriteStdInput hIn
       performEvent_ $ liftIO . writeInput <$> input
       sigOut :: Event t (Maybe P.Signal) <- performEvent $ ffor signal $ \sig -> liftIO $ do
         mpid <- P.getPid ph
@@ -151,7 +151,7 @@ createProcessBufferingInput
   => IO (SendPipe ByteString) -- ^ Read a value from the input stream buffer
   -> (SendPipe ByteString -> IO ()) -- ^ Write a value to the input stream buffer
   -> CreateProcess -- ^ The process specification
-  -> ProcessConfig t ByteString -- ^ The process configuration in terms of Reflex
+  -> ProcessConfig t (SendPipe ByteString) -- ^ The process configuration in terms of Reflex
   -> m (Process t ByteString ByteString)
 createProcessBufferingInput readBuffer writeBuffer p procConfig = do
   let
@@ -197,7 +197,7 @@ createProcessBufferingInput readBuffer writeBuffer p procConfig = do
 createProcess
   :: (MonadIO m, TriggerEvent t m, PerformEvent t m, MonadIO (Performable m))
   => CreateProcess
-  -> ProcessConfig t ByteString
+  -> ProcessConfig t (SendPipe ByteString)
   -> m (Process t ByteString ByteString)
 createProcess p procConfig = do
   channel <- liftIO newChan
