@@ -12,6 +12,7 @@ module Reflex.Process
   , createRedirectedProcess
   , Process(..)
   , ProcessConfig(..)
+  , SendPipe (..)
   ) where
 
 import Control.Concurrent (forkIO, killThread, ThreadId)
@@ -32,9 +33,19 @@ import System.Process hiding (createProcess)
 
 import Reflex
 
+data SendPipe i
+  = SendPipe_Message i
+  -- ^ A message that's sent to the underlying process
+  | SendPipe_EOF
+  -- ^ Send an EOF to the underlying process
+  | SendPipe_LastMessage i
+  -- ^ Send the last message (an EOF will be added). This option is offered for
+  -- convenience, because it has the same effect of sending a Message and then
+  -- the EOF signal
+
 -- | The inputs to a process
 data ProcessConfig t i = ProcessConfig
-  { _processConfig_stdin :: Event t i
+  { _processConfig_stdin :: Event t (SendPipe i)
   -- ^ "stdin" input to be fed to the process
   , _processConfig_signal :: Event t P.Signal
   -- ^ Signals to send to the process
@@ -69,7 +80,7 @@ data Process t o e = Process
 -- to those pipes.
 createRedirectedProcess
   :: forall t m i o e. (MonadIO m, TriggerEvent t m, PerformEvent t m, MonadIO (Performable m))
-  => (Handle -> IO (i -> IO ()))
+  => (Handle -> IO (SendPipe i -> IO ()))
   -- ^ Builder for the standard input handler
   -> (Handle -> (o -> IO ()) -> IO (IO ()))
   -- ^ Builder for the standard output handler
@@ -87,7 +98,7 @@ createRedirectedProcess mkWriteStdInput mkReadStdOutput mkReadStdError p (Proces
   po@(mi, mout, merr, ph) <- liftIO $ createProcessFunction redirectedProc
   case (mi, mout, merr) of
     (Just hIn, Just hOut, Just hErr) -> do
-      writeInput :: i -> IO () <- liftIO $ mkWriteStdInput hIn
+      writeInput :: SendPipe i -> IO () <- liftIO $ mkWriteStdInput hIn
       performEvent_ $ liftIO . writeInput <$> input
       sigOut :: Event t (Maybe P.Signal) <- performEvent $ ffor signal $ \sig -> liftIO $ do
         mpid <- P.getPid ph
@@ -140,22 +151,26 @@ createRedirectedProcess mkWriteStdInput mkReadStdOutput mkReadStdError p (Proces
 -- to those pipes.
 createProcessBufferingInput
   :: (MonadIO m, TriggerEvent t m, PerformEvent t m, MonadIO (Performable m))
-  => IO ByteString -- ^ Read a value from the input stream buffer
-  -> (ByteString -> IO ()) -- ^ Write a value to the input stream buffer
+  => IO (SendPipe ByteString) -- ^ Read a value from the input stream buffer
+  -> (SendPipe ByteString -> IO ()) -- ^ Write a value to the input stream buffer
   -> CreateProcess -- ^ The process specification
   -> ProcessConfig t ByteString -- ^ The process configuration in terms of Reflex
   -> m (Process t ByteString ByteString)
 createProcessBufferingInput readBuffer writeBuffer p procConfig = do
   let
+    input :: Handle -> IO (SendPipe ByteString -> IO ())
     input h = do
       H.hSetBuffering h H.NoBuffering
       void $ liftIO $ forkIO $ fix $ \loop -> do
-        newMessage <- readBuffer
+        newMessage :: SendPipe ByteString <- readBuffer
         open <- H.hIsOpen h
         when open $ do
           writable <- H.hIsWritable h
           when writable $ do
-            BS.hPutStr h newMessage
+            case newMessage of
+              SendPipe_Message m -> BS.hPutStr h m
+              SendPipe_LastMessage m -> BS.hPutStr h m >> H.hClose h
+              SendPipe_EOF -> H.hClose h
             loop
       return writeBuffer
 
