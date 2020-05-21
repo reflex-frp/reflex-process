@@ -9,6 +9,7 @@ import Control.Monad (void)
 import Control.Monad.IO.Class (liftIO)
 import Data.ByteString (ByteString)
 import Data.IORef (newIORef, writeIORef, readIORef)
+import Data.Foldable (traverse_)
 import Reflex
 import System.Timeout (timeout)
 import qualified Data.ByteString.Char8 as BS
@@ -51,28 +52,28 @@ checkFRPBlocking downstreamProcess exitMVar = do
 
   let
     createProcessWithTermination cp = do
-      procData <- P.createProcess cp
+      procData <- redirectingCreateProcess cp
       writeIORef spawnedProcess (Just procData)
       pure procData
 
   finally
     (runHeadlessApp $ do
       timer <- tickLossyFromPostBuildTime 1
-      void $ performEvent $ (liftIO $ tryPutMVar exitMVar Exit) <$ timer
+      void $ performEvent $ liftIO (tryPutMVar exitMVar Exit) <$ timer
 
       (ev, evTrigger :: SendPipe ByteString -> IO ()) <- newTriggerEvent
-      processOutput <- createProcess downstreamProcess (ProcessConfig ev never createProcessWithTermination)
+      processOutput <- createProcess $ ProcessConfig ev never (createProcessWithTermination downstreamProcess)
       liftIO $ evTrigger $ SendPipe_Message $ veryLongByteString 'a'
       liftIO $ evTrigger $ SendPipe_Message $ veryLongByteString 'b'
       liftIO $ evTrigger $ SendPipe_LastMessage $ veryLongByteString 'c'
 
-      void $ performEvent $ liftIO . BS.putStrLn <$> (_process_stdout processOutput)
-      pure never)
-
-    (readIORef spawnedProcess >>= mapM_ P.cleanupProcess)
+      void $ performEvent $ liftIO . BS.putStrLn <$> _process_stdout processOutput
+      pure never
+    )
+    (readIORef spawnedProcess >>= traverse_ (\(hIn, hOut, hErr, ph) -> P.cleanupProcess (Just hIn, Just hOut, Just hErr, ph)))
 
 -- It's important to try this with long bytestrings to be sure that they're not
 -- put in an operative system inter-process buffer.
 veryLongByteString :: Char -> ByteString
-veryLongByteString c = BS.replicate 100000 c
+veryLongByteString = BS.replicate 100000
 --------------------------------------------------------------------------------

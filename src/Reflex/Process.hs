@@ -9,7 +9,9 @@ Description: Run interactive shell commands in reflex
 module Reflex.Process
   ( createProcess
   , createProcessBufferingInput
-  , createRedirectedProcess
+  , createProcessWith
+  , defProcessConfig
+  , redirectingCreateProcess
   , Process(..)
   , ProcessConfig(..)
   , SendPipe (..)
@@ -22,7 +24,6 @@ import Control.Monad (void, when)
 import Control.Monad.IO.Class (MonadIO, liftIO)
 import Data.ByteString (ByteString)
 import qualified Data.ByteString as BS
-import Data.Default (Default (..))
 import Data.Function (fix)
 import GHC.IO.Handle (Handle)
 import qualified GHC.IO.Handle as H
@@ -49,15 +50,16 @@ data ProcessConfig t i = ProcessConfig
   -- ^ "stdin" input to be fed to the process
   , _processConfig_signal :: Event t P.Signal
   -- ^ Signals to send to the process
-  , _processConfig_createProcess
-    :: P.CreateProcess -> IO (Maybe Handle, Maybe Handle, Maybe Handle, ProcessHandle)
-  -- ^ Used for dependency injection (for example to ensure, in the test suite,
-  -- that the child process is properly terminated). Defaults to
-  -- 'System.Process.createProcess'
+  , _processConfig_createProcess :: IO (Handle, Handle, Handle, P.ProcessHandle)
+  -- ^ Configurable version of 'System.Process.createProcess' that must create pipes
+  -- for 'std_in', 'std_out', and 'std_err'.
   }
 
-instance Reflex t => Default (ProcessConfig t i) where
-  def = ProcessConfig never never P.createProcess
+-- | Make a default 'ProcessConfig' with the given 'System.Process.CreateProcess'
+-- using 'redirectingCreateProcess'.
+defProcessConfig :: Reflex t => P.CreateProcess -> ProcessConfig t i
+defProcessConfig p = ProcessConfig never never (redirectingCreateProcess p)
+
 
 -- | The output of a process
 data Process t o e = Process
@@ -80,7 +82,7 @@ data Process t o e = Process
 -- NB: The 'std_in', 'std_out', and 'std_err' parameters of the
 -- provided 'CreateProcess' are replaced with new pipes and all output is redirected
 -- to those pipes.
-createRedirectedProcess
+createProcessWith
   :: forall t m i o e. (MonadIO m, TriggerEvent t m, PerformEvent t m, MonadIO (Performable m))
   => (Handle -> IO (i -> IO ()))
   -- ^ Builder for the standard input handler
@@ -88,56 +90,47 @@ createRedirectedProcess
   -- ^ Builder for the standard output handler
   -> (Handle -> (e -> IO ()) -> IO (IO ()))
   -- ^ Builder for the standard error handler
-  -> CreateProcess
   -> ProcessConfig t i
   -> m (Process t o e)
-createRedirectedProcess mkWriteStdInput mkReadStdOutput mkReadStdError p (ProcessConfig input signal createProcessFunction) = do
-  let redirectedProc = p
-        { std_in = CreatePipe
-        , std_out = CreatePipe
-        , std_err = CreatePipe
-        }
-  po@(mi, mout, merr, ph) <- liftIO $ createProcessFunction redirectedProc
-  case (mi, mout, merr) of
-    (Just hIn, Just hOut, Just hErr) -> do
-      writeInput :: i -> IO () <- liftIO $ mkWriteStdInput hIn
-      performEvent_ $ liftIO . writeInput <$> input
-      sigOut :: Event t (Maybe P.Signal) <- performEvent $ ffor signal $ \sig -> liftIO $ do
-        mpid <- P.getPid ph
-        case mpid of
-          Nothing -> return Nothing
-          Just pid -> do
-            P.signalProcess sig pid >> return (Just sig)
-      let
-        output :: Handle -> m (Event t o, Async ())
-        output h = do
-          (e, trigger) <- newTriggerEvent
-          reader <- liftIO $ mkReadStdOutput h trigger
-          t <- liftIO $ async reader
-          return (e, t)
+createProcessWith mkWriteStdInput mkReadStdOutput mkReadStdError (ProcessConfig input signal createProc) = do
+  (hIn, hOut, hErr, ph) <- liftIO createProc
+  writeInput :: i -> IO () <- liftIO $ mkWriteStdInput hIn
+  performEvent_ $ liftIO . writeInput <$> input
+  sigOut :: Event t (Maybe P.Signal) <- performEvent $ ffor signal $ \sig -> liftIO $ do
+    mpid <- P.getPid ph
+    case mpid of
+      Nothing -> return Nothing
+      Just pid -> do
+        P.signalProcess sig pid >> return (Just sig)
+  let
+    output :: Handle -> m (Event t o, Async ())
+    output h = do
+      (e, trigger) <- newTriggerEvent
+      reader <- liftIO $ mkReadStdOutput h trigger
+      t <- liftIO $ async reader
+      return (e, t)
 
-        errOutput :: Handle -> m (Event t e, Async ())
-        errOutput h = do
-          (e, trigger) <- newTriggerEvent
-          reader <- liftIO $ mkReadStdError h trigger
-          t <- liftIO $ async reader
-          return (e, t)
+    errOutput :: Handle -> m (Event t e, Async ())
+    errOutput h = do
+      (e, trigger) <- newTriggerEvent
+      reader <- liftIO $ mkReadStdError h trigger
+      t <- liftIO $ async reader
+      return (e, t)
 
-      (out, outThread) <- output hOut
-      (err, errThread) <- errOutput hErr
-      (ecOut, ecTrigger) <- newTriggerEvent
-      void $ liftIO $ async $ flip finally (P.cleanupProcess po) $ do
-        waited <- waitForProcess ph
-        _ <- waitBoth outThread errThread
-        ecTrigger waited -- Output events should never fire after process completion
-      return $ Process
-        { _process_exit = ecOut
-        , _process_stdout = out
-        , _process_stderr = err
-        , _process_signal = fmapMaybe id sigOut
-        , _process_handle = ph
-        }
-    _ -> error "Reflex.Process.createRedirectedProcess: Created pipes were not returned by System.Process.createProcess."
+  (out, outThread) <- output hOut
+  (err, errThread) <- errOutput hErr
+  (ecOut, ecTrigger) <- newTriggerEvent
+  void $ liftIO $ async $ flip finally (P.cleanupProcess (Just hIn, Just hOut, Just hErr, ph)) $ do
+    waited <- waitForProcess ph
+    _ <- waitBoth outThread errThread
+    ecTrigger waited -- Output events should never fire after process completion
+  return $ Process
+    { _process_exit = ecOut
+    , _process_stdout = out
+    , _process_stderr = err
+    , _process_signal = fmapMaybe id sigOut
+    , _process_handle = ph
+    }
 
 -- | Create a process feeding it input using an 'Event' and exposing its output with 'Event's
 -- for its exit code, stdout, and stderr. The input is fed via a buffer represented by a
@@ -152,10 +145,9 @@ createProcessBufferingInput
   :: (MonadIO m, TriggerEvent t m, PerformEvent t m, MonadIO (Performable m))
   => IO (SendPipe ByteString) -- ^ Read a value from the input stream buffer
   -> (SendPipe ByteString -> IO ()) -- ^ Write a value to the input stream buffer
-  -> CreateProcess -- ^ The process specification
   -> ProcessConfig t (SendPipe ByteString) -- ^ The process configuration in terms of Reflex
   -> m (Process t ByteString ByteString)
-createProcessBufferingInput readBuffer writeBuffer p procConfig = do
+createProcessBufferingInput readBuffer writeBuffer procConfig = do
   let
     input :: Handle -> IO (SendPipe ByteString -> IO ())
     input h = do
@@ -183,7 +175,7 @@ createProcessBufferingInput readBuffer writeBuffer p procConfig = do
             if BS.null out
               then H.hClose h
               else void (trigger out) *> go
-  createRedirectedProcess input output output p procConfig
+  createProcessWith input output output procConfig
 
 -- | Create a process feeding it input using an 'Event' and exposing its output
 -- 'Event's representing the process exit code, stdout, and stderr.
@@ -198,9 +190,16 @@ createProcessBufferingInput readBuffer writeBuffer p procConfig = do
 -- to those pipes.
 createProcess
   :: (MonadIO m, TriggerEvent t m, PerformEvent t m, MonadIO (Performable m))
-  => CreateProcess
-  -> ProcessConfig t (SendPipe ByteString)
+  => ProcessConfig t (SendPipe ByteString)
   -> m (Process t ByteString ByteString)
-createProcess p procConfig = do
+createProcess procConfig = do
   channel <- liftIO newChan
-  createProcessBufferingInput (readChan channel) (writeChan channel) p procConfig
+  createProcessBufferingInput (readChan channel) (writeChan channel) procConfig
+
+-- | Like 'System.Process.createProcess' but always redirects 'std_in', 'std_out', and 'std_err'.
+redirectingCreateProcess :: P.CreateProcess -> IO (Handle, Handle, Handle, P.ProcessHandle)
+redirectingCreateProcess p = do
+  r <- P.createProcess p { std_in = P.CreatePipe, std_out = P.CreatePipe, std_err = P.CreatePipe }
+  case r of
+    (Just hIn, Just hOut, Just hErr, ph) -> pure (hIn, hOut, hErr, ph)
+    _ -> error "Reflex.Process.redirectingCreateProcess: Created pipes were not returned by System.Process.createProcess."
