@@ -32,7 +32,7 @@ The following example uses [reflex-vty](https://github.com/reflex-frp/reflex-vty
 > main :: IO ()
 > main = mainWidget $ do
 >   exit <- keyCombos $ Set.singleton (V.KChar 'c', [V.MCtrl])
->   p <- createProcess $ defProcessConfig cmd
+>   p <- createProcess cmd def
 >   stdout <- foldDyn (flip mappend) "" $ _process_stdout p
 >   boxStatic def $ col $ do
 >     fixed 3 $ boxStatic def $ text "reflex-process"
