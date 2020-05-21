@@ -1,6 +1,6 @@
 cabal-version: >=1.10
 name: reflex-process
-version: 0.2.1.0
+version: 0.3.0.0
 synopsis: reflex-frp interface for running shell commands
 description: Run shell commands from within reflex applications and interact with them over a functional-reactive interface
 bug-reports: https://github.com/reflex-frp/reflex-process/issues
