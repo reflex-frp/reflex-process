@@ -14,24 +14,35 @@ module Reflex.Process
   , redirectingCreateProcess
   , Process(..)
   , ProcessConfig(..)
+  , SendPipe (..)
   ) where
 
-import Control.Concurrent (forkIO, killThread, ThreadId)
+import Control.Concurrent.Async (Async, async, waitBoth)
 import Control.Concurrent.Chan (newChan, readChan, writeChan)
-import Control.Exception (mask_)
+import Control.Exception (finally)
 import Control.Monad (void, when)
 import Control.Monad.IO.Class (MonadIO, liftIO)
 import Data.ByteString (ByteString)
 import qualified Data.ByteString as BS
-import qualified GHC.IO.Handle as H
+import Data.Function (fix)
 import GHC.IO.Handle (Handle)
+import qualified GHC.IO.Handle as H
 import System.Exit (ExitCode)
-import Data.Function
 import qualified System.Posix.Signals as P
+import System.Process hiding (createProcess)
 import qualified System.Process as P
-import System.Process (std_err, std_in, std_out)
 
 import Reflex
+
+data SendPipe i
+  = SendPipe_Message i
+  -- ^ A message that's sent to the underlying process
+  | SendPipe_EOF
+  -- ^ Send an EOF to the underlying process
+  | SendPipe_LastMessage i
+  -- ^ Send the last message (an EOF will be added). This option is offered for
+  -- convenience, because it has the same effect of sending a Message and then
+  -- the EOF signal
 
 -- | The inputs to a process
 data ProcessConfig t i = ProcessConfig
@@ -58,6 +69,8 @@ data Process t o e = Process
   , _process_stderr :: Event t e
   -- ^ Fires whenever there's some new stderr output. See note on '_process_stdout'.
   , _process_exit :: Event t ExitCode
+  -- ^ Fires when the process is over and no @stdout@ or @stderr@ data is left.
+  -- Once this fires, no other 'Event's for the process will fire again.
   , _process_signal :: Event t P.Signal
   -- ^ Fires when a signal has actually been sent to the process (via '_processConfig_signal').
   }
@@ -87,31 +100,30 @@ createProcessWith mkWriteStdInput mkReadStdOutput mkReadStdError (ProcessConfig 
     mpid <- P.getPid ph
     case mpid of
       Nothing -> return Nothing
-      Just pid -> Just sig <$ P.signalProcess sig pid
+      Just pid -> do
+        P.signalProcess sig pid >> return (Just sig)
   let
-    output :: Handle -> m (Event t o, ThreadId)
+    output :: Handle -> m (Event t o, Async ())
     output h = do
       (e, trigger) <- newTriggerEvent
       reader <- liftIO $ mkReadStdOutput h trigger
-      t <- liftIO $ forkIO reader
+      t <- liftIO $ async reader
       return (e, t)
 
-    err_output :: Handle -> m (Event t e, ThreadId)
-    err_output h = do
+    errOutput :: Handle -> m (Event t e, Async ())
+    errOutput h = do
       (e, trigger) <- newTriggerEvent
       reader <- liftIO $ mkReadStdError h trigger
-      t <- liftIO $ forkIO reader
+      t <- liftIO $ async reader
       return (e, t)
+
   (out, outThread) <- output hOut
-  (err, errThread) <- err_output hErr
+  (err, errThread) <- errOutput hErr
   (ecOut, ecTrigger) <- newTriggerEvent
-  void $ liftIO $ forkIO $ do
-    waited <- P.waitForProcess ph
-    mask_ $ do
-      ecTrigger waited
-      P.cleanupProcess (Just hIn, Just hOut, Just hErr, ph)
-      killThread outThread
-      killThread errThread
+  void $ liftIO $ async $ flip finally (P.cleanupProcess (Just hIn, Just hOut, Just hErr, ph)) $ do
+    waited <- waitForProcess ph
+    _ <- waitBoth outThread errThread
+    ecTrigger waited -- Output events should never fire after process completion
   return $ Process
     { _process_exit = ecOut
     , _process_stdout = out
@@ -131,38 +143,38 @@ createProcessWith mkWriteStdInput mkReadStdOutput mkReadStdError (ProcessConfig 
 -- to those pipes.
 createProcessBufferingInput
   :: (MonadIO m, TriggerEvent t m, PerformEvent t m, MonadIO (Performable m))
-  => IO ByteString -- ^ Read a value from the input stream buffer
-  -> (ByteString -> IO ()) -- ^ Write a value to the input stream buffer
-  -> ProcessConfig t ByteString -- ^ The process configuration in terms of Reflex
+  => IO (SendPipe ByteString) -- ^ Read a value from the input stream buffer
+  -> (SendPipe ByteString -> IO ()) -- ^ Write a value to the input stream buffer
+  -> ProcessConfig t (SendPipe ByteString) -- ^ The process configuration in terms of Reflex
   -> m (Process t ByteString ByteString)
 createProcessBufferingInput readBuffer writeBuffer procConfig = do
   let
+    input :: Handle -> IO (SendPipe ByteString -> IO ())
     input h = do
       H.hSetBuffering h H.NoBuffering
-      void $ liftIO $ forkIO $ fix $ \loop -> do
+      void $ liftIO $ async $ fix $ \loop -> do
         newMessage <- readBuffer
         open <- H.hIsOpen h
         when open $ do
           writable <- H.hIsWritable h
           when writable $ do
-            BS.hPutStr h newMessage
+            case newMessage of
+              SendPipe_Message m -> BS.hPutStr h m
+              SendPipe_LastMessage m -> BS.hPutStr h m >> H.hClose h
+              SendPipe_EOF -> H.hClose h
             loop
       return writeBuffer
-
     output h trigger = do
       H.hSetBuffering h H.LineBuffering
-      let go = do
-            open <- H.hIsOpen h
-            when open $ do
-              readable <- H.hIsReadable h
-              when readable $ do
-                out <- BS.hGetSome h 32768
-                if BS.null out
-                  then return ()
-                  else do
-                    void $ trigger out
-                    go
-      return go
+      pure $ fix $ \go -> do
+        open <- H.hIsOpen h
+        when open $ do
+          readable <- H.hIsReadable h
+          when readable $ do
+            out <- BS.hGetSome h 32768
+            if BS.null out
+              then H.hClose h
+              else void (trigger out) *> go
   createProcessWith input output output procConfig
 
 -- | Create a process feeding it input using an 'Event' and exposing its output
@@ -178,12 +190,11 @@ createProcessBufferingInput readBuffer writeBuffer procConfig = do
 -- to those pipes.
 createProcess
   :: (MonadIO m, TriggerEvent t m, PerformEvent t m, MonadIO (Performable m))
-  => ProcessConfig t ByteString
+  => ProcessConfig t (SendPipe ByteString)
   -> m (Process t ByteString ByteString)
 createProcess procConfig = do
   channel <- liftIO newChan
   createProcessBufferingInput (readChan channel) (writeChan channel) procConfig
-
 
 -- | Like 'System.Process.createProcess' but always redirects 'std_in', 'std_out', and 'std_err'.
 redirectingCreateProcess :: P.CreateProcess -> IO (Handle, Handle, Handle, P.ProcessHandle)

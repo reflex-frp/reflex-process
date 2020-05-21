@@ -1,4 +1,4 @@
-reflex-process 
+reflex-process
 ==============
 
 [![hackage](https://img.shields.io/hackage/v/reflex-process.svg)](https://hackage.haskell.org/package/reflex-process) [![hackage-ci](https://matrix.hackage.haskell.org/api/v2/packages/reflex-process/badge)](https://matrix.hackage.haskell.org/#/package/reflex-process) [![travis-ci](https://api.travis-ci.org/reflex-frp/reflex-process.svg?branch=develop)](https://travis-ci.org/reflex-frp/reflex-process)
@@ -32,7 +32,7 @@ The following example uses [reflex-vty](https://github.com/reflex-frp/reflex-vty
 > main :: IO ()
 > main = mainWidget $ do
 >   exit <- keyCombos $ Set.singleton (V.KChar 'c', [V.MCtrl])
->   p <- createProcess cmd def
+>   p <- createProcess $ defProcessConfig cmd
 >   stdout <- foldDyn (flip mappend) "" $ _process_stdout p
 >   boxStatic def $ col $ do
 >     fixed 3 $ boxStatic def $ text "reflex-process"

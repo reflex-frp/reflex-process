@@ -9,6 +9,7 @@ import Control.Monad (void)
 import Control.Monad.IO.Class (liftIO)
 import Data.ByteString (ByteString)
 import Data.IORef (newIORef, writeIORef, readIORef)
+import Data.Foldable (traverse_)
 import Reflex
 import System.Timeout (timeout)
 import qualified Data.ByteString.Char8 as BS
@@ -60,11 +61,11 @@ checkFRPBlocking downstreamProcess exitMVar = do
       timer <- tickLossyFromPostBuildTime 1
       void $ performEvent $ liftIO (tryPutMVar exitMVar Exit) <$ timer
 
-      (ev, evTrigger :: ByteString -> IO ()) <- newTriggerEvent
+      (ev, evTrigger :: SendPipe ByteString -> IO ()) <- newTriggerEvent
       processOutput <- createProcess $ ProcessConfig ev never (createProcessWithTermination downstreamProcess)
-      liftIO $ evTrigger $ veryLongByteString 'a'
-      liftIO $ evTrigger $ veryLongByteString 'b'
-      liftIO $ evTrigger $ veryLongByteString 'c'
+      liftIO $ evTrigger $ SendPipe_Message $ veryLongByteString 'a'
+      liftIO $ evTrigger $ SendPipe_Message $ veryLongByteString 'b'
+      liftIO $ evTrigger $ SendPipe_LastMessage $ veryLongByteString 'c'
 
       void $ performEvent $ liftIO . BS.putStrLn <$> _process_stdout processOutput
       pure never
