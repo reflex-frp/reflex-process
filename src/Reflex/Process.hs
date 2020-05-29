@@ -1,6 +1,6 @@
 {-|
 Module: Reflex.Process
-Description: Run interactive shell commands in reflex
+Description: Run processes and interact with them in reflex
 -}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE GADTs #-}
