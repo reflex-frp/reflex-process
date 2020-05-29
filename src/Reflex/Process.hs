@@ -14,6 +14,9 @@ module Reflex.Process
   , Process(..)
   , ProcessConfig(..)
   , SendPipe (..)
+
+  -- Deprecations
+  , createRedirectedProcess
   ) where
 
 import Control.Concurrent.Async (Async, async, waitBoth)
@@ -224,3 +227,14 @@ unsafeCreateProcessWithHandles mkWriteStdInput mkReadStdOutput mkReadStdError p 
     , _process_signal = fmapMaybe id sigOut
     , _process_handle = ph
     }
+
+{-# DEPRECATED createRedirectedProcess "Use unsafeCreateProcessWithHandles instead." #-}
+createRedirectedProcess
+  :: forall t m i o e. (MonadIO m, TriggerEvent t m, PerformEvent t m, MonadIO (Performable m))
+  => (Handle -> IO (i -> IO ()))
+  -> (Handle -> (o -> IO ()) -> IO (IO ()))
+  -> (Handle -> (e -> IO ()) -> IO (IO ()))
+  -> P.CreateProcess
+  -> ProcessConfig t i
+  -> m (Process t o e)
+createRedirectedProcess = unsafeCreateProcessWithHandles
