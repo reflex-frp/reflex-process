@@ -50,19 +50,15 @@ checkFRPBlocking :: P.CreateProcess -> MVar Exit -> IO ()
 checkFRPBlocking downstreamProcess exitMVar = do
   spawnedProcess <- newIORef Nothing
 
-  let
-    createProcessWithTermination cp = do
-      procData <- redirectingCreateProcess cp
-      writeIORef spawnedProcess (Just procData)
-      pure procData
-
   finally
     (runHeadlessApp $ do
       timer <- tickLossyFromPostBuildTime 1
       void $ performEvent $ liftIO (tryPutMVar exitMVar Exit) <$ timer
 
       (ev, evTrigger :: SendPipe ByteString -> IO ()) <- newTriggerEvent
-      processOutput <- createProcess $ ProcessConfig ev never (createProcessWithTermination downstreamProcess)
+      processOutput <- createProcess downstreamProcess $ ProcessConfig ev never
+      liftIO $ writeIORef spawnedProcess (Just $ _process_handle processOutput)
+
       liftIO $ evTrigger $ SendPipe_Message $ veryLongByteString 'a'
       liftIO $ evTrigger $ SendPipe_Message $ veryLongByteString 'b'
       liftIO $ evTrigger $ SendPipe_LastMessage $ veryLongByteString 'c'
@@ -70,7 +66,7 @@ checkFRPBlocking downstreamProcess exitMVar = do
       void $ performEvent $ liftIO . BS.putStrLn <$> _process_stdout processOutput
       pure never
     )
-    (readIORef spawnedProcess >>= traverse_ (\(hIn, hOut, hErr, ph) -> P.cleanupProcess (Just hIn, Just hOut, Just hErr, ph)))
+    (readIORef spawnedProcess >>= traverse_ P.terminateProcess)
 
 -- It's important to try this with long bytestrings to be sure that they're not
 -- put in an operative system inter-process buffer.
