@@ -20,6 +20,7 @@ library
   build-depends: base >=4.12 && <4.14
                , async >= 2 && < 3
                , bytestring >=0.10 && < 0.11
+               , data-default >= 0.2 && < 0.8
                , process >= 1.6.4 && < 1.7
                , reflex >= 0.7.1 && < 0.8
                , unix >= 2.7 && < 2.8

@@ -2,16 +2,14 @@
 
 ## 0.3.0.0
 
+* ([#15](https://github.com/reflex-frp/reflex-process/pull/15), [#13](https://github.com/reflex-frp/reflex-process/pull/13)) **(Breaking change)** Introduce `SendPipe` type for encoding when an input stream should send EOF and change `createProcess` to take a `ProcessConfig t (SendPipe ByteString)` so that sending EOF is possible.
+  * **IMPORTANT**: `SendPipe_Message` is not strictly equivalent to the prior behavior. Prior to this change, `createProcess` always added a new line to all messages sent to the process. This implicit new line has been removed and *you must now add any new lines to your messages manually.* This implicit change allows `createProcess` to work with processes that truly take binary data on `stdin`.
+* ([#17](https://github.com/reflex-frp/reflex-process/pull/17)) **(Breaking change)** Rename `createRedirectedProcess` to `unsafeCreateProcessWithHandles` to communicate that it does not enforce necessary guarantees for the process to be handled correctly.
+* ([#15](https://github.com/reflex-frp/reflex-process/pull/15), [#13](https://github.com/reflex-frp/reflex-process/pull/13)) **(Breaking change)** Sending a message with `SendPipe_Message` `createProcess`
 * ([#11](https://github.com/reflex-frp/reflex-process/pull/11)) Add `createProcessBufferingInput` for buffering input to processes and change `createProcess` to use an unbounded buffer instead of blocking the FRP network when the process blocks on its input handle.
 * ([#11](https://github.com/reflex-frp/reflex-process/pull/11), [#14](https://github.com/reflex-frp/reflex-process/pull/14)) `ProcessConfig` now includes a `_processConfig_createProcess` field for customizing how the process is created.
 * ([#13](https://github.com/reflex-frp/reflex-process/pull/13)) Fix race condition between process completion `Event`s and process `stdout`/`stderr` `Event`s. Process completion is now always the very last `Event` to fire for a given `Process`.
-* ([#15](https://github.com/reflex-frp/reflex-process/pull/15), [#13](https://github.com/reflex-frp/reflex-process/pull/13)) **(Breaking change)** Introduce `SendPipe` type for encoding when an input stream should send EOF and change `createProcess` to take a `ProcessConfig t (SendPipe ByteString)` so that sending EOF is possible.
-* ([#14](https://github.com/reflex-frp/reflex-process/pull/14)) **(Breaking change)** Consolidate `ProcessConfig` and `CreateProcess` which has the following effects:
-  * Instead of constructing `ProcessConfig` with `def` you now use `defProcessConfig` and provide your `CreateProcess` here.
-  * `createRedirectedProcess` was renamed to `createProcessWith` and now takes a single `ProcessConfig` as normally constructed by `defProcessConfig`.
-  * `createProcess` now takes a single `ProcessConfig` as normally constructed by `defProcessConfig`.
-
-  For example, if you had `createProcess cmd def`, you would change it to `createProcess (defProcessConfig cmd)`.
+* ([#17](https://github.com/reflex-frp/reflex-process/pull/17)) Add `defProcessConfig` to avoid forcing users to depend on `data-default`.
 
 
 ## 0.2.1.0
