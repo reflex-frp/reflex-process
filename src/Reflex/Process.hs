@@ -19,7 +19,7 @@ module Reflex.Process
   , createRedirectedProcess
   ) where
 
-import Control.Concurrent.Async (Async, async, waitBoth)
+import Control.Concurrent.Async (Async, async, race_, wait, waitBoth)
 import Control.Concurrent.Chan (newChan, readChan, writeChan)
 import Control.Exception (finally)
 import Control.Monad (void, when)
@@ -134,10 +134,10 @@ createProcessBufferingInput
   -> m (Process t ByteString ByteString)
 createProcessBufferingInput readBuffer writeBuffer = unsafeCreateProcessWithHandles input output output
   where
-    input :: Handle -> IO (SendPipe ByteString -> IO ())
-    input h = do
+    input :: Async () -> Handle -> IO (SendPipe ByteString -> IO ())
+    input procThread h = do
       H.hSetBuffering h H.NoBuffering
-      void $ liftIO $ async $ fix $ \loop -> do
+      void $ liftIO $ async $ race_ (wait procThread) $ fix $ \loop -> do
         newMessage <- readBuffer
         open <- H.hIsOpen h
         when open $ do
@@ -169,8 +169,11 @@ createProcessBufferingInput readBuffer writeBuffer = unsafeCreateProcessWithHand
 -- to those pipes.
 unsafeCreateProcessWithHandles
   :: forall t m i o e. (MonadIO m, TriggerEvent t m, PerformEvent t m, MonadIO (Performable m))
-  => (Handle -> IO (i -> IO ()))
-  -- ^ Builder for the standard input handler. The 'Handle' is the write end of the process' @stdin@ and
+  => (Async () -> Handle -> IO (i -> IO ()))
+  -- ^ Builder for the standard input handler.
+  -- The 'Async ()' is the thread managing the process. If this thread is killed the process is killed.
+  -- This is provided so you can link any new threads to this one to avoid leaking threads.
+  -- The 'Handle' is the write end of the process' @stdin@ and
   -- the resulting @i -> IO ()@ is a function that writes each input 'Event t i' to into 'Handle'.
   -- This function must not block or the entire Reflex network will block.
   -> (Handle -> (o -> IO ()) -> IO (IO ()))
@@ -191,8 +194,6 @@ unsafeCreateProcessWithHandles mkWriteStdInput mkReadStdOutput mkReadStdError p 
   (hIn, hOut, hErr, ph) <- case po of
     (Just hIn, Just hOut, Just hErr, ph) -> pure (hIn, hOut, hErr, ph)
     _ -> error "Reflex.Process.unsafeCreateProcessWithHandles: Created pipes were not returned by System.Process.createProcess."
-  writeInput :: i -> IO () <- liftIO $ mkWriteStdInput hIn
-  performEvent_ $ liftIO . writeInput <$> input
   sigOut :: Event t (Maybe P.Signal) <- performEvent $ ffor signal $ \sig -> liftIO $ do
     mpid <- P.getPid ph
     for mpid $ \pid -> sig <$ P.signalProcess sig pid
@@ -214,10 +215,14 @@ unsafeCreateProcessWithHandles mkWriteStdInput mkReadStdOutput mkReadStdError p 
   (out, outThread) <- output hOut
   (err, errThread) <- errOutput hErr
   (ecOut, ecTrigger) <- newTriggerEvent
-  void $ liftIO $ async $ flip finally (P.cleanupProcess (Just hIn, Just hOut, Just hErr, ph)) $ do
+  procThread <- liftIO $ async $ flip finally (P.cleanupProcess (Just hIn, Just hOut, Just hErr, ph)) $ do
     waited <- waitForProcess ph
     _ <- waitBoth outThread errThread
     ecTrigger waited -- Output events should never fire after process completion
+
+  writeInput :: i -> IO () <- liftIO $ mkWriteStdInput procThread hIn
+  performEvent_ $ liftIO . writeInput <$> input
+
   return $ Process
     { _process_exit = ecOut
     , _process_stdout = out
@@ -235,4 +240,4 @@ createRedirectedProcess
   -> P.CreateProcess
   -> ProcessConfig t i
   -> m (Process t o e)
-createRedirectedProcess = unsafeCreateProcessWithHandles
+createRedirectedProcess f = unsafeCreateProcessWithHandles (const f)
