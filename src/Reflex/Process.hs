@@ -145,10 +145,9 @@ createProcessBufferingInput readBuffer writeBuffer = unsafeCreateProcessWithHand
           writable <- H.hIsWritable h
           when writable $ do
             case newMessage of
-              SendPipe_Message m -> BS.hPutStr h m
-              SendPipe_LastMessage m -> BS.hPutStr h m >> H.hClose h
+              SendPipe_Message m -> BS.hPutStr h m *> loop
+              SendPipe_LastMessage m -> BS.hPutStr h m *> H.hClose h
               SendPipe_EOF -> H.hClose h
-            loop
       return writeBuffer
     output h trigger = do
       H.hSetBuffering h H.LineBuffering
