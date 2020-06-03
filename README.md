@@ -1,4 +1,4 @@
-reflex-process 
+reflex-process
 ==============
 
 [![hackage](https://img.shields.io/hackage/v/reflex-process.svg)](https://hackage.haskell.org/package/reflex-process) [![hackage-ci](https://matrix.hackage.haskell.org/api/v2/packages/reflex-process/badge)](https://matrix.hackage.haskell.org/#/package/reflex-process) [![travis-ci](https://api.travis-ci.org/reflex-frp/reflex-process.svg?branch=develop)](https://travis-ci.org/reflex-frp/reflex-process)
@@ -41,3 +41,12 @@ The following example uses [reflex-vty](https://github.com/reflex-frp/reflex-vty
 >     stretch $ text $ T.decodeUtf8 <$> current stdout
 >   pure $ () <$ exit
 ```
+
+Developer environment
+---------------------
+
+You can get `ghcid` running for working on the code with the command:
+```
+nix-shell -E '((import ./reflex-platform {}).ghc.callCabal2nix "reflex-process" ./. {}).env' --run ghcid
+```
+
