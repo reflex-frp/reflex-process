@@ -132,22 +132,23 @@ createProcessBufferingInput
   -> P.CreateProcess -- ^ Specification of process to create
   -> ProcessConfig t (SendPipe ByteString) -- ^ Reflex-level configuration for the process
   -> m (Process t ByteString ByteString)
-createProcessBufferingInput readBuffer writeBuffer = unsafeCreateProcessWithHandles input output output
+createProcessBufferingInput readBuffer writeBuffer spec procConfig = do
+  (process, procThread, h) <- unsafeCreateProcessWithHandles output output (_processConfig_signal procConfig) spec
+  performEvent_ $ liftIO . writeBuffer <$> _processConfig_stdin procConfig
+  liftIO $ do
+    H.hSetBuffering h H.NoBuffering
+    void $ liftIO $ async $ race_ (wait procThread) $ fix $ \loop -> do
+      newMessage <- readBuffer
+      open <- H.hIsOpen h
+      when open $ do
+        writable <- H.hIsWritable h
+        when writable $ do
+          case newMessage of
+            SendPipe_Message m -> BS.hPutStr h m *> loop
+            SendPipe_LastMessage m -> BS.hPutStr h m *> H.hClose h
+            SendPipe_EOF -> H.hClose h
+  pure process
   where
-    input :: Async () -> Handle -> IO (SendPipe ByteString -> IO ())
-    input procThread h = do
-      H.hSetBuffering h H.NoBuffering
-      void $ liftIO $ async $ race_ (wait procThread) $ fix $ \loop -> do
-        newMessage <- readBuffer
-        open <- H.hIsOpen h
-        when open $ do
-          writable <- H.hIsWritable h
-          when writable $ do
-            case newMessage of
-              SendPipe_Message m -> BS.hPutStr h m *> loop
-              SendPipe_LastMessage m -> BS.hPutStr h m *> H.hClose h
-              SendPipe_EOF -> H.hClose h
-      return writeBuffer
     output h trigger = do
       H.hSetBuffering h H.LineBuffering
       pure $ fix $ \go -> do
@@ -160,23 +161,15 @@ createProcessBufferingInput readBuffer writeBuffer = unsafeCreateProcessWithHand
               then H.hClose h
               else void (trigger out) *> go
 
--- | Runs a process and uses the given input and output handler functions to
--- interact with the process via the standard streams. Used to implement
--- 'createProcess'.
+-- | Runs a process and uses the given output handler functions to interact with the process via the
+-- standard streams. @stdin@ of the process is returned to be handled by the caller.
 --
 -- N.B.: The 'std_in', 'std_out', and 'std_err' parameters of the
 -- provided 'CreateProcess' are replaced with new pipes and all output is redirected
 -- to those pipes.
 unsafeCreateProcessWithHandles
-  :: forall t m i o e. (MonadIO m, TriggerEvent t m, PerformEvent t m, MonadIO (Performable m))
-  => (Async () -> Handle -> IO (i -> IO ()))
-  -- ^ Builder for the standard input handler.
-  -- The 'Async ()' is the thread managing the process. If this thread is killed the process is killed.
-  -- This is provided so you can link any new threads to this one to avoid leaking threads.
-  -- The 'Handle' is the write end of the process' @stdin@ and
-  -- the resulting @i -> IO ()@ is a function that writes each input 'Event t i' to into 'Handle'.
-  -- This function must not block or the entire Reflex network will block.
-  -> (Handle -> (o -> IO ()) -> IO (IO ()))
+  :: forall t m o e. (MonadIO m, TriggerEvent t m, PerformEvent t m, MonadIO (Performable m))
+  => (Handle -> (o -> IO ()) -> IO (IO ()))
   -- ^ Builder for the standard output handler. The 'Handle' is the read end of the process' @stdout@ and
   -- the @o -> IO ()@ is a function that will trigger the output @Event t o@ when called. The resulting
   -- @IO ()@ will be run in a separate thread and must block until there is no more data in the 'Handle' to
@@ -186,10 +179,13 @@ unsafeCreateProcessWithHandles
   -- the @e -> IO ()@ is a function that will trigger the output @Event t e@ when called. The resulting
   -- @IO ()@ will be run in a separate thread and must block until there is no more data in the 'Handle' to
   -- process.
+  -> Event t P.Signal
+  -- ^ Signals to send to the process.
   -> P.CreateProcess -- ^ Specification of process to create
-  -> ProcessConfig t i -- ^ Reflex-level configuration for the process
-  -> m (Process t o e)
-unsafeCreateProcessWithHandles mkWriteStdInput mkReadStdOutput mkReadStdError p (ProcessConfig input signal) = do
+  -> m (Process t o e, Async (), Handle)
+  -- ^ Resulting 'Process' along with the 'Async' thread that manages the underlying process and the 'Handle'
+  -- for the process's @stdin@.
+unsafeCreateProcessWithHandles mkReadStdOutput mkReadStdError signal p = do
   po <- liftIO $ P.createProcess p { std_in = P.CreatePipe, std_out = P.CreatePipe, std_err = P.CreatePipe }
   (hIn, hOut, hErr, ph) <- case po of
     (Just hIn, Just hOut, Just hErr, ph) -> pure (hIn, hOut, hErr, ph)
@@ -220,18 +216,15 @@ unsafeCreateProcessWithHandles mkWriteStdInput mkReadStdOutput mkReadStdError p 
     _ <- waitBoth outThread errThread
     ecTrigger waited -- Output events should never fire after process completion
 
-  writeInput :: i -> IO () <- liftIO $ mkWriteStdInput procThread hIn
-  performEvent_ $ liftIO . writeInput <$> input
-
-  return $ Process
+  return (Process
     { _process_exit = ecOut
     , _process_stdout = out
     , _process_stderr = err
     , _process_signal = fmapMaybe id sigOut
     , _process_handle = ph
-    }
+    }, procThread, hIn)
 
-{-# DEPRECATED createRedirectedProcess "Use unsafeCreateProcessWithHandles instead." #-}
+{-# DEPRECATED createRedirectedProcess "Use unsafeCreateProcessWithHandles instead and handle stdin yourself." #-}
 createRedirectedProcess
   :: forall t m i o e. (MonadIO m, TriggerEvent t m, PerformEvent t m, MonadIO (Performable m))
   => (Handle -> IO (i -> IO ()))
@@ -240,4 +233,8 @@ createRedirectedProcess
   -> P.CreateProcess
   -> ProcessConfig t i
   -> m (Process t o e)
-createRedirectedProcess f = unsafeCreateProcessWithHandles (const f)
+createRedirectedProcess mkWriteStdInput mkReadStdOutput mkReadStdError p (ProcessConfig input signal) = do
+  (process, _, hIn) <- unsafeCreateProcessWithHandles mkReadStdOutput mkReadStdError signal p
+  writeInput <- liftIO $ mkWriteStdInput hIn
+  performEvent_ $ liftIO . writeInput <$> input
+  pure process
