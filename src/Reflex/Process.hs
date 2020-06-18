@@ -19,7 +19,7 @@ module Reflex.Process
   , createRedirectedProcess
   ) where
 
-import Control.Concurrent.Async (Async, async, race_, wait, waitBoth)
+import Control.Concurrent.Async (Async, async, race_, waitBoth)
 import Control.Concurrent.Chan (newChan, readChan, writeChan)
 import Control.Exception (finally)
 import Control.Monad (void, when)
@@ -133,11 +133,11 @@ createProcessBufferingInput
   -> ProcessConfig t (SendPipe ByteString) -- ^ Reflex-level configuration for the process
   -> m (Process t ByteString ByteString)
 createProcessBufferingInput readBuffer writeBuffer spec procConfig = do
-  (process, procThread, h) <- unsafeCreateProcessWithHandles output output (_processConfig_signal procConfig) spec
+  (process, h) <- unsafeCreateProcessWithHandles output output (_processConfig_signal procConfig) spec
   performEvent_ $ liftIO . writeBuffer <$> _processConfig_stdin procConfig
   liftIO $ do
     H.hSetBuffering h H.NoBuffering
-    void $ liftIO $ async $ race_ (wait procThread) $ fix $ \loop -> do
+    void $ liftIO $ async $ race_ (waitForProcess $ _process_handle process) $ fix $ \loop -> do
       newMessage <- readBuffer
       open <- H.hIsOpen h
       when open $ do
@@ -182,9 +182,8 @@ unsafeCreateProcessWithHandles
   -> Event t P.Signal
   -- ^ Signals to send to the process.
   -> P.CreateProcess -- ^ Specification of process to create
-  -> m (Process t o e, Async (), Handle)
-  -- ^ Resulting 'Process' along with the 'Async' thread that manages the underlying process and the 'Handle'
-  -- for the process's @stdin@.
+  -> m (Process t o e, Handle)
+  -- ^ Resulting 'Process' and the 'Handle' for the process' @stdin@.
 unsafeCreateProcessWithHandles mkReadStdOutput mkReadStdError signal p = do
   po <- liftIO $ P.createProcess p { std_in = P.CreatePipe, std_out = P.CreatePipe, std_err = P.CreatePipe }
   (hIn, hOut, hErr, ph) <- case po of
@@ -211,7 +210,7 @@ unsafeCreateProcessWithHandles mkReadStdOutput mkReadStdError signal p = do
   (out, outThread) <- output hOut
   (err, errThread) <- errOutput hErr
   (ecOut, ecTrigger) <- newTriggerEvent
-  procThread <- liftIO $ async $ flip finally (P.cleanupProcess (Just hIn, Just hOut, Just hErr, ph)) $ do
+  void $ liftIO $ async $ flip finally (P.cleanupProcess (Just hIn, Just hOut, Just hErr, ph)) $ do
     waited <- waitForProcess ph
     _ <- waitBoth outThread errThread
     ecTrigger waited -- Output events should never fire after process completion
@@ -222,7 +221,7 @@ unsafeCreateProcessWithHandles mkReadStdOutput mkReadStdError signal p = do
     , _process_stderr = err
     , _process_signal = fmapMaybe id sigOut
     , _process_handle = ph
-    }, procThread, hIn)
+    }, hIn)
 
 {-# DEPRECATED createRedirectedProcess "Use unsafeCreateProcessWithHandles instead and handle stdin yourself." #-}
 createRedirectedProcess
@@ -234,7 +233,7 @@ createRedirectedProcess
   -> ProcessConfig t i
   -> m (Process t o e)
 createRedirectedProcess mkWriteStdInput mkReadStdOutput mkReadStdError p (ProcessConfig input signal) = do
-  (process, _, hIn) <- unsafeCreateProcessWithHandles mkReadStdOutput mkReadStdError signal p
+  (process, hIn) <- unsafeCreateProcessWithHandles mkReadStdOutput mkReadStdError signal p
   writeInput <- liftIO $ mkWriteStdInput hIn
   performEvent_ $ liftIO . writeInput <$> input
   pure process
