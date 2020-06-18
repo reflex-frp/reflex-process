@@ -19,7 +19,7 @@ module Reflex.Process
   , createRedirectedProcess
   ) where
 
-import Control.Concurrent.Async (Async, async, race_, wait, waitBoth)
+import Control.Concurrent.Async (Async, async, race_, waitBoth)
 import Control.Concurrent.Chan (newChan, readChan, writeChan)
 import Control.Exception (finally)
 import Control.Monad (void, when)
@@ -134,10 +134,10 @@ createProcessBufferingInput
   -> m (Process t ByteString ByteString)
 createProcessBufferingInput readBuffer writeBuffer = unsafeCreateProcessWithHandles input output output
   where
-    input :: Async () -> Handle -> IO (SendPipe ByteString -> IO ())
-    input procThread h = do
+    input :: Process t ByteString ByteString -> Handle -> IO (SendPipe ByteString -> IO ())
+    input ph h = do
       H.hSetBuffering h H.NoBuffering
-      void $ liftIO $ async $ race_ (wait procThread) $ fix $ \loop -> do
+      void $ liftIO $ async $ race_ (waitForProcess $ _process_handle ph) $ fix $ \loop -> do
         newMessage <- readBuffer
         open <- H.hIsOpen h
         when open $ do
@@ -169,9 +169,9 @@ createProcessBufferingInput readBuffer writeBuffer = unsafeCreateProcessWithHand
 -- to those pipes.
 unsafeCreateProcessWithHandles
   :: forall t m i o e. (MonadIO m, TriggerEvent t m, PerformEvent t m, MonadIO (Performable m))
-  => (Async () -> Handle -> IO (i -> IO ()))
+  => (Process t o e -> Handle -> IO (i -> IO ()))
   -- ^ Builder for the standard input handler.
-  -- The 'Async ()' is the thread managing the process. If this thread is killed the process is killed.
+  -- The 'Process' is the same value that returned by this function.
   -- This is provided so you can link any new threads to this one to avoid leaking threads.
   -- The 'Handle' is the write end of the process' @stdin@ and
   -- the resulting @i -> IO ()@ is a function that writes each input 'Event t i' to into 'Handle'.
@@ -215,21 +215,23 @@ unsafeCreateProcessWithHandles mkWriteStdInput mkReadStdOutput mkReadStdError p 
   (out, outThread) <- output hOut
   (err, errThread) <- errOutput hErr
   (ecOut, ecTrigger) <- newTriggerEvent
-  procThread <- liftIO $ async $ flip finally (P.cleanupProcess (Just hIn, Just hOut, Just hErr, ph)) $ do
+  void $ liftIO $ async $ flip finally (P.cleanupProcess (Just hIn, Just hOut, Just hErr, ph)) $ do
     waited <- waitForProcess ph
     _ <- waitBoth outThread errThread
     ecTrigger waited -- Output events should never fire after process completion
 
-  writeInput :: i -> IO () <- liftIO $ mkWriteStdInput procThread hIn
+  let
+    process = Process
+      { _process_exit = ecOut
+      , _process_stdout = out
+      , _process_stderr = err
+      , _process_signal = fmapMaybe id sigOut
+      , _process_handle = ph
+      }
+  writeInput :: i -> IO () <- liftIO $ mkWriteStdInput process hIn
   performEvent_ $ liftIO . writeInput <$> input
 
-  return $ Process
-    { _process_exit = ecOut
-    , _process_stdout = out
-    , _process_stderr = err
-    , _process_signal = fmapMaybe id sigOut
-    , _process_handle = ph
-    }
+  pure process
 
 {-# DEPRECATED createRedirectedProcess "Use unsafeCreateProcessWithHandles instead." #-}
 createRedirectedProcess
