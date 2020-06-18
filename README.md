@@ -1,12 +1,12 @@
 reflex-process
 ==============
 
-[![hackage](https://img.shields.io/hackage/v/reflex-process.svg)](https://hackage.haskell.org/package/reflex-process) [![hackage-ci](https://matrix.hackage.haskell.org/api/v2/packages/reflex-process/badge)](https://matrix.hackage.haskell.org/#/package/reflex-process) [![travis-ci](https://api.travis-ci.org/reflex-frp/reflex-process.svg?branch=develop)](https://travis-ci.org/reflex-frp/reflex-process)
+[![Haskell](https://img.shields.io/badge/language-Haskell-orange.svg)](https://haskell.org) [![Hackage](https://img.shields.io/hackage/v/reflex-process.svg)](https://hackage.haskell.org/package/reflex-process) [![Hackage CI](https://matrix.hackage.haskell.org/api/v2/packages/reflex-process/badge)](https://matrix.hackage.haskell.org/#/package/reflex-process) [![Travis CI](https://api.travis-ci.org/reflex-frp/reflex-process.svg?branch=develop)](https://travis-ci.org/reflex-frp/reflex-process) [![BSD3 License](https://img.shields.io/badge/license-BSD3-blue.svg)](https://github.com/reflex-frp/reflex-process/blob/master/LICENSE)
 
-Functional-reactive shell commands
-----------------------------------
+Functional-reactive system processes
+------------------------------------
 
-This library provides a functional-reactive interface for running shell commands from [reflex](https://github.com/reflex-frp/reflex).
+Run and interact with system processes from within a [Reflex FRP](https://reflex-frp.org/) application.
 
 Example
 -------
@@ -46,7 +46,8 @@ Developer environment
 ---------------------
 
 You can get `ghcid` running for working on the code with the command:
-```
+
+```bash
 nix-shell -E '((import ./reflex-platform {}).ghc.callCabal2nix "reflex-process" ./. {}).env' --run ghcid
 ```
 
