@@ -40,13 +40,11 @@ import Reflex
 
 data SendPipe i
   = SendPipe_Message i
-  -- ^ A message that's sent to the underlying process
+  -- ^ A message that's sent to the underlying process. This does NOT include a trailing newline when sending your message.
   | SendPipe_EOF
-  -- ^ Send an EOF to the underlying process
+  -- ^ Send an EOF to the underlying process. Once this is sent no further messages will be processed.
   | SendPipe_LastMessage i
-  -- ^ Send the last message (an EOF will be added). This option is offered for
-  -- convenience, because it has the same effect of sending a Message and then
-  -- the EOF signal
+  -- ^ Send the last message along with an EOF. Once this is sent no further messages will be processed.
 
 -- | The inputs to a process
 data ProcessConfig t i = ProcessConfig
@@ -81,7 +79,7 @@ data Process t o e = Process
   }
 
 -- | Create a process feeding it input using an 'Event' and exposing its output
--- 'Event's representing the process exit code, stdout, and stderr.
+-- 'Event's representing the process exit code, @stdout@, and @stderr@.
 --
 -- The @stdout@ and @stderr@ 'Handle's are line-buffered.
 --
@@ -106,11 +104,12 @@ createProcess p procConfig = do
 --
 -- The @stdout@ and @stderr@ 'Handle's are line-buffered.
 --
--- For example, you may use 'Chan' for an unbounded buffer (like 'createProcess' does) like this:
+-- For example, you may use @Chan@ for an unbounded buffer (like 'createProcess' does) like this:
+--
 -- >  channel <- liftIO newChan
 -- >  createProcessBufferingInput (readChan channel) (writeChan channel) myConfig
 --
--- Similarly you could use 'TChan'.
+-- Similarly you could use @TChan@.
 --
 -- Bounded buffers may cause the Reflex network to block when you trigger an 'Event' that would
 -- cause more data to be sent to a process whose @stdin@ is blocked.
@@ -127,7 +126,7 @@ createProcessBufferingInput
   :: (MonadIO m, TriggerEvent t m, PerformEvent t m, MonadIO (Performable m))
   => IO (SendPipe ByteString)
   -- ^ An action that reads a value from the input stream buffer.
-  -- This must block when the buffer is empty or not ready.
+  -- This will run in a separate thread and must block when the buffer is empty or not ready.
   -> (SendPipe ByteString -> IO ())
   -- ^ An action that writes a value to the input stream buffer.
   -> P.CreateProcess -- ^ Specification of process to create
@@ -145,10 +144,9 @@ createProcessBufferingInput readBuffer writeBuffer = unsafeCreateProcessWithHand
           writable <- H.hIsWritable h
           when writable $ do
             case newMessage of
-              SendPipe_Message m -> BS.hPutStr h m
-              SendPipe_LastMessage m -> BS.hPutStr h m >> H.hClose h
+              SendPipe_Message m -> BS.hPutStr h m *> loop
+              SendPipe_LastMessage m -> BS.hPutStr h m *> H.hClose h
               SendPipe_EOF -> H.hClose h
-            loop
       return writeBuffer
     output h trigger = do
       H.hSetBuffering h H.LineBuffering
@@ -174,7 +172,7 @@ unsafeCreateProcessWithHandles
   => (Handle -> IO (i -> IO ()))
   -- ^ Builder for the standard input handler. The 'Handle' is the write end of the process' @stdin@ and
   -- the resulting @i -> IO ()@ is a function that writes each input 'Event t i' to into 'Handle'.
-  -- This functios must not block or the entire Reflex network will block.
+  -- This function must not block or the entire Reflex network will block.
   -> (Handle -> (o -> IO ()) -> IO (IO ()))
   -- ^ Builder for the standard output handler. The 'Handle' is the read end of the process' @stdout@ and
   -- the @o -> IO ()@ is a function that will trigger the output @Event t o@ when called. The resulting
