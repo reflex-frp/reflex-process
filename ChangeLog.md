@@ -1,5 +1,10 @@
 # Revision history for reflex-process
 
+## 0.3.1.0
+
+* Support reflex 0.8
+* Fix a handle leak (#23) and a thread leak (#24)
+
 ## 0.3.0.0
 
 * ([#15](https://github.com/reflex-frp/reflex-process/pull/15), [#13](https://github.com/reflex-frp/reflex-process/pull/13)) **(Breaking change)** Introduce `SendPipe` type for encoding when an input stream should send EOF. Change `createProcess` to take a `ProcessConfig t (SendPipe ByteString)` so that sending EOF is possible.
