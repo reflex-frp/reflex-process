@@ -16,7 +16,12 @@ category: System, FRP
 build-type: Simple
 extra-source-files: ChangeLog.md
                     README.md
-tested-with: GHC ==8.6.5
+tested-with:
+  GHC ==8.6.5 || ==8.8.4 || ==8.10.2
+
+source-repository head
+  type: git
+  location: https://github.com/reflex-frp/reflex-process
 
 library
   exposed-modules: Reflex.Process
