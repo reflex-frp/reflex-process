@@ -30,15 +30,15 @@ The following example uses [reflex-vty](https://github.com/reflex-frp/reflex-vty
 > cmd = P.proc "ls" ["-a"]
 >
 > main :: IO ()
-> main = mainWidget $ do
+> main = mainWidget $ initManager_ $ do
 >   exit <- keyCombos $ Set.singleton (V.KChar 'c', [V.MCtrl])
 >   p <- createProcess cmd def
 >   stdout <- foldDyn (flip mappend) "" $ _process_stdout p
 >   boxStatic def $ col $ do
->     fixed 3 $ boxStatic def $ text "reflex-process"
->     fixed 3 $ text "Press Ctrl-C to exit."
->     fixed 1 $ text "stdout:"
->     stretch $ text $ T.decodeUtf8 <$> current stdout
+>     grout (fixed 3) $ boxStatic def $ text "reflex-process"
+>     grout (fixed 3) $ text "Press Ctrl-C to exit."
+>     grout (fixed 1) $ text "stdout:"
+>     grout flex $ text $ T.decodeUtf8 <$> current stdout
 >   pure $ () <$ exit
 ```
 
