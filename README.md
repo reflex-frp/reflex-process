@@ -22,6 +22,7 @@ The following example uses [reflex-vty](https://github.com/reflex-frp/reflex-vty
 > import Control.Monad ((<=<))
 > import Data.Default (def)
 > import qualified Data.Set as Set
+> import qualified Data.Text as T
 > import qualified Data.Text.Encoding as T
 > import qualified Graphics.Vty.Input as V
 > import qualified System.Process as P
@@ -30,15 +31,18 @@ The following example uses [reflex-vty](https://github.com/reflex-frp/reflex-vty
 > cmd = P.proc "ls" ["-a"]
 >
 > main :: IO ()
-> main = mainWidget $ do
+> main = mainWidget $ initManager_ $ col $ do
 >   exit <- keyCombos $ Set.singleton (V.KChar 'c', [V.MCtrl])
 >   p <- createProcess cmd def
 >   stdout <- foldDyn (flip mappend) "" $ _process_stdout p
->   boxStatic def $ col $ do
->     fixed 3 $ boxStatic def $ text "reflex-process"
->     fixed 3 $ text "Press Ctrl-C to exit."
->     fixed 1 $ text "stdout:"
->     stretch $ text $ T.decodeUtf8 <$> current stdout
+>   grout flex $ boxStatic def $ col $ do
+>     grout (fixed 3) $ boxStatic def $ text "reflex-process"
+>     grout (fixed 3) $ text "Press Ctrl-C to exit."
+>     grout (fixed 2) $ text $ pure $ "Running command: " <> case P.cmdspec cmd of
+>       P.ShellCommand s -> T.pack s
+>       P.RawCommand p args -> T.intercalate " " $ T.pack <$> (p : args)
+>     grout (fixed 1) $ text "stdout:"
+>     grout flex $ text $ T.decodeUtf8 <$> current stdout
 >   pure $ () <$ exit
 ```
 
