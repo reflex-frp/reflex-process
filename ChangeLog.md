@@ -1,5 +1,9 @@
 # Revision history for reflex-process
 
+## 0.3.1.2
+
+* Update readme example to support reflex-vty 0.3
+
 ## 0.3.1.1
 
 * Update readme example to use reflex-vty 0.2
