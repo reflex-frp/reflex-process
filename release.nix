@@ -1,54 +1,93 @@
-{ pkgs ? import ./nixpkgs {}
-, supportedSystems ? [ "x86_64-linux" "x86_64-darwin" ]
+{ reflex-platform ? import ./reflex-platform
 }:
 let
+  pkgs = (reflex-platform {}).nixpkgs;
+  supportedSystems = [ "x86_64-linux" "x86_64-darwin" ];
   inherit (pkgs) lib;
-  sharedOverrides = self: super: {
+  haskellLib = pkgs.haskell.lib;
+  commonOverrides = self: super: {
+    vty = self.callHackageDirect {
+      pkg = "vty";
+      ver = "5.38";
+      sha256 = "0kcd3ln9xmc62ka0i7habzvjjar8z63mlvl15rdhf8hqmda0b7r7";
+    } {};
     reflex-vty = self.callHackageDirect {
       pkg = "reflex-vty";
-      ver = "0.2.0.0";
-      sha256 = "1vb38qx1a6l28i4wd1g48qqmymlzivq7lwmxbywjs0b36ynsnfk8";
-    } {};
-    reflex = self.callHackageDirect {
-      pkg = "reflex";
-      ver = "0.8.1.1";
-      sha256 = "1sdakz8rgdhvrcq004926dmbwlmhmv7wsw9h7f8klnvdsydm7dh7";
-    } {};
-    patch = self.callHackageDirect {
-      pkg = "patch";
-      ver = "0.0.4.0";
-      sha256 = "1x1rbi51r5gvbkg96884c2py7in4n0ijh5ins8ya3b5kga32siq4";
+      ver = "0.4.1.1";
+      sha256 = "1dzkfhfwifl47fvvzd40yqvyckpc3q6d9g18az9mqlbxfhszfb45";
     } {};
   };
+  ghcs = lib.genAttrs supportedSystems (system: let
+    rp = reflex-platform { inherit system; __useNewerCompiler = true; };
+    rpGhc810 = rp.ghc.override {
+      overrides = commonOverrides;
+    };
+    rpOld = reflex-platform { inherit system; __useNewerCompiler = false; };
+    rpGhc865 = rpOld.ghc.override {
+      overrides = commonOverrides;
+    };
 
-  ghcs = {
-    ghc865 = pkgs.haskell.packages.ghc865.override {
-      overrides = self: super: sharedOverrides self super // {
-        ghc-lib-parser = self.callHackageDirect {
-          pkg = "ghc-lib-parser";
-          ver = "8.8.4.20210620";
-          sha256 = "17y7f5h1mrfyblaz0ipws04a4z11vnwkfvzzk8mkyrkz4am1a8fp";
+    nixGhc961 = (import ./nixpkgs { inherit system; }).haskell.packages.ghc961.override {
+      overrides = self: super: commonOverrides self super // {
+        patch = self.callHackageDirect {
+          pkg = "patch";
+          ver = "0.0.8.2";
+          sha256 = "160zqqhjg48fr3a33gffd82qm3728c8hwf8sn37pbpv82fw71rzg";
         } {};
-        ghc-lib-parser-ex = self.callHackageDirect {
-          pkg = "ghc-lib-parser-ex";
-          ver = "8.8.5.8";
-          sha256 = "1avdm9fzgk59xzq5xv5rlnncq4vgqsf3jyf46889cf7gcfb40aff";
+
+        reflex = self.callHackageDirect {
+          pkg = "reflex";
+          ver = "0.9.0.1";
+          sha256 = "1yrcashxxclvlvv3cs5gv75rvlsg1gb0m36kssnk2zvhbh94240y";
         } {};
-        hlint = self.callHackageDirect {
-          pkg = "hlint";
-          ver = "2.2.11";
-          sha256 = "0v4axmqb3zwzznyvhiqbr50k23ah63sd9gsmi5sa2p97hch8kwx1";
+        these-lens = self.callHackageDirect {
+          pkg = "these-lens";
+          ver = "1.0.1.3";
+          sha256 = "0n1vkr57jz5yvy4jm15v5cs42rp342ni0gisib7aqyhibpicqs5c";
         } {};
+        these = self.callHackageDirect {
+          pkg = "these";
+          ver = "1.2";
+          sha256 = "1iaaq1fsvg8c3l0czcicshkmbbr00hnwkdamjbkljsa1qvlilaf0";
+        } {};
+        lens = self.callHackageDirect {
+          pkg = "lens";
+          ver = "5.2.2";
+          sha256 = "0c4a421sxfjm1cj3nvgwkr4glll23mqnsvs2iv5qh85931h2f3cy";
+        } {};
+
+        assoc = self.callHackageDirect {
+          pkg = "assoc";
+          ver = "1.1";
+          sha256 = "1krvcafrbj98z5hv55gq4zb1in5yd71nmz9zdiqgnywjzbrvpf75";
+        } {};
+
+        strict = self.callHackageDirect {
+          pkg = "strict";
+          ver = "0.5";
+          sha256 = "02iyvrr7nd7fnivz78lzdchy8zw1cghqj1qx2yzbbb9869h1mny7";
+        } {};
+        vty = self.callHackageDirect {
+          pkg = "vty";
+          ver = "5.38";
+          sha256 = "0kcd3ln9xmc62ka0i7habzvjjar8z63mlvl15rdhf8hqmda0b7r7";
+        } {};
+
+
+        # Jailbroken until https://github.com/audreyt/string-qq/pull/3
+        string-qq = haskellLib.dontCheck super.string-qq;
+        # Tests aren't compatible with transformers-0.6
+        bimap = haskellLib.dontCheck super.bimap;
+        exception-transformers = haskellLib.doJailbreak (haskellLib.dontCheck super.exception-transformers);
 
       };
     };
-    ghc884 = pkgs.haskell.packages.ghc884.override {
-      overrides = sharedOverrides;
-    };
-    ghc8104 = pkgs.haskell.packages.ghc8104.override {
-      overrides = sharedOverrides;
-    };
-  };
-in
-  lib.mapAttrs (_: ghc: ghc.callCabal2nix "reflex-process" ./. {}) ghcs
-
+  in
+  {
+    recurseForDerivations = true;
+    ghc865 = rpGhc865.callCabal2nix "reflex-process" (import ./src.nix) {};
+    ghc810 = rpGhc810.callCabal2nix "reflex-process" (import ./src.nix) {};
+    ghc961 = nixGhc961.callCabal2nix "reflex-process" (import ./src.nix) {};
+  });
+  in
+    ghcs
