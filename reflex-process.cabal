@@ -27,7 +27,7 @@ library
   exposed-modules: Reflex.Process
   build-depends: base >=4.12 && <4.19
                , async >= 2 && < 3
-               , bytestring >=0.10 && < 0.11
+               , bytestring >=0.10 && < 0.12
                , data-default >= 0.2 && < 0.8
                , process >= 1.6.4 && < 1.7
                , reflex >= 0.7.1 && < 1
