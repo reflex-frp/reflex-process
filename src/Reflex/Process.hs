@@ -47,6 +47,7 @@ data SendPipe i
   -- ^ Send an EOF to the underlying process. Once this is sent no further messages will be processed.
   | SendPipe_LastMessage i
   -- ^ Send the last message along with an EOF. Once this is sent no further messages will be processed.
+  deriving (Show, Eq, Ord)
 
 -- | The inputs to a process
 data ProcessConfig t i = ProcessConfig
