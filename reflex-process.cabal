@@ -1,6 +1,6 @@
 cabal-version: >=1.10
 name: reflex-process
-version: 0.3.1.2
+version: 0.3.2.0
 synopsis: Reflex FRP interface for running system processes
 description:
   Run and interact with system processes from within a Reflex FRP application.
