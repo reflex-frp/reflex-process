@@ -45,7 +45,7 @@ executable readme
                , process
                , reflex
                , reflex-process
-               , reflex-vty >= 0.2 && < 0.5
+               , reflex-vty >= 0.2 && < 0.7
                , text >= 1.2.3 && < 2.1
                , vty
   default-language: Haskell2010
