@@ -1,6 +1,6 @@
 cabal-version: >=1.10
 name: reflex-process
-version: 0.3.2.0
+version: 0.3.3.0
 synopsis: Reflex FRP interface for running system processes
 description:
   Run and interact with system processes from within a Reflex FRP application.
@@ -25,9 +25,11 @@ source-repository head
 
 library
   exposed-modules: Reflex.Process
+                   Reflex.Process.Lines
   build-depends: base >=4.12 && <4.19
                , async >= 2 && < 3
-               , bytestring >=0.10 && < 0.12
+               , bytestring >= 0.10 && < 0.12
+               , containers >= 0.6 && < 0.7
                , data-default >= 0.2 && < 0.8
                , process >= 1.6.4 && < 1.7
                , reflex >= 0.7.1 && < 1
