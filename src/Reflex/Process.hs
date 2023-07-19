@@ -141,7 +141,7 @@ createProcessBufferingInput readBuffer writeBuffer spec config = do
   where
     input :: ProcessHandle -> Handle -> IO (SendPipe ByteString -> IO ())
     input ph h = do
-      H.hSetBuffering h H.NoBuffering
+      H.hIsOpen h >>= \open -> if open then H.hSetBuffering h H.LineBuffering else return ()
       void $ liftIO $ async $ race_ (waitForProcess ph) $ fix $ \loop -> do
         newMessage <- readBuffer
         open <- H.hIsOpen h
@@ -154,7 +154,7 @@ createProcessBufferingInput readBuffer writeBuffer spec config = do
               SendPipe_EOF -> H.hClose h
       return writeBuffer
     output h trigger = do
-      H.hSetBuffering h H.LineBuffering
+      H.hIsOpen h >>= \open -> if open then H.hSetBuffering h H.LineBuffering else return ()
       pure $ fix $ \go -> do
         open <- H.hIsOpen h
         when open $ do
