@@ -1,5 +1,9 @@
 # Revision history for reflex-process
 
+## 0.3.2.1
+
+* Allow reflex-vty 0.5.*
+
 ## 0.3.2.0
 
 * Derive Eq, Ord, and Show instances for SendPipe
