@@ -1,5 +1,13 @@
 # Revision history for reflex-process
 
+## 0.3.3.0
+
+* Add `Lines` for keeping track of accumulated output, including both terminated and unterminated lines
+
+## 0.3.2.0-r1
+
+* Allow reflex-vty 0.5
+
 ## 0.3.2.0
 
 * Derive Eq, Ord, and Show instances for SendPipe
