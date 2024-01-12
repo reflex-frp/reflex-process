@@ -31,34 +31,40 @@ main = hspec $ do
       timeoutWrapperAsync (checkFRPBlocking $ P.proc "cat" []) `shouldReturn` Right (Just Exit)
     it "isn't blocked by a downstream blocking process" $ do
       timeoutWrapperAsync (checkFRPBlocking $ P.proc "sleep" ["infinity"]) `shouldReturn` Right (Just Exit)
-    it "sends messages on stdin and receives messages on stdout and stderr" $ runHeadlessApp $ do
-      let
-        -- Produces an event when the given message is seen on both stdout and stderr of the given process events
-        getSawMessage procOut msg = do
-          let filterMsg = mapMaybe (guard . (== msg))
-          seen <- foldDyn ($) (False, False) $
-            mergeWith (.)
-              [ first (const True) <$ filterMsg (_process_stdout procOut)
-              , second (const True) <$ filterMsg (_process_stderr procOut)
-              ]
-          pure $ mapMaybe (guard . (== (True, True))) $ updated seen
-
-      rec
-        procOut <- createProcess (P.proc "tee" ["/dev/stderr"]) $ ProcessConfig send never
-        aWasSeen <- getSawMessage procOut "a\n"
-        bWasSeen <- getSawMessage procOut "b\n"
-        pb <- getPostBuild
+    it "sends messages on stdin and receives messages on stdout and stderr" $ do
+      () <- runHeadlessApp $ do
         let
-          send = leftmost
-            [ SendPipe_Message "a\n" <$ pb
-            , SendPipe_Message "b\n" <$ aWasSeen
-            , SendPipe_LastMessage "c\n" <$ bWasSeen
-            ]
+          -- Produces an event when the given message is seen on both stdout and stderr of the given process events
+          getSawMessage procOut msg = do
+            let filterMsg = mapMaybe (guard . (== msg))
+            seen <- foldDyn ($) (False, False) $
+              mergeWith (.)
+                [ first (const True) <$ filterMsg (_process_stdout procOut)
+                , second (const True) <$ filterMsg (_process_stderr procOut)
+                ]
+            pure $ mapMaybe (guard . (== (True, True))) $ updated seen
 
-      getSawMessage procOut "c\n"
+        rec
+          procOut <- createProcess (P.proc "tee" ["/dev/stderr"]) $ ProcessConfig send never
+          aWasSeen <- getSawMessage procOut "a\n"
+          bWasSeen <- getSawMessage procOut "b\n"
+          pb <- getPostBuild
+          let
+            send = leftmost
+              [ SendPipe_Message "a\n" <$ pb
+              , SendPipe_Message "b\n" <$ aWasSeen
+              , SendPipe_LastMessage "c\n" <$ bWasSeen
+              ]
 
-    it "sends signals" $ runHeadlessApp $ void . _process_exit <$> sendSignalTest
-    it "fires event when signal is sent" $ runHeadlessApp $ void . _process_signal <$> sendSignalTest
+        getSawMessage procOut "c\n"
+      pure ()
+
+    it "sends signals" $ do
+      () <- runHeadlessApp $ void . _process_exit <$> sendSignalTest
+      pure ()
+    it "fires event when signal is sent" $ do
+      () <- runHeadlessApp $ void . _process_signal <$> sendSignalTest
+      pure ()
 
   where
     sendSignalTest :: MonadHeadlessApp t m => m (Process t ByteString ByteString)
@@ -67,7 +73,6 @@ main = hspec $ do
       procOut <- createProcess (P.proc "sleep" ["infinity"]) $ ProcessConfig never signal
       liftIO $ threadDelay 1000000 *> signalTrigger 15 -- SIGTERM
       pure procOut
-
 
 -- This datatype signals that the FRP network was able to exit on its own.
 data Exit = Exit deriving (Show, Eq)
