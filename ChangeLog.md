@@ -1,5 +1,9 @@
 # Revision history for reflex-process
 
+## 0.3.3.1
+
+* Support for reflex-0.9.3
+
 ## 0.3.3.0
 
 * Add `Lines` for keeping track of accumulated output, including both terminated and unterminated lines
