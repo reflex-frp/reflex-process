@@ -49,9 +49,6 @@ The following example uses [reflex-vty](https://github.com/reflex-frp/reflex-vty
 Developer environment
 ---------------------
 
-You can get `ghcid` running for working on the code with the command:
+You can enter a development shell by running `nix-shell`.
 
-```bash
-nix-shell -E '((import ./reflex-platform {}).ghc.callCabal2nix "reflex-process" ./. {}).env' --run ghcid
-```
-
+From the shell, you can run `cabal` or `ghc` commands or `ghcid`.
