@@ -1,5 +1,9 @@
 # Revision history for reflex-process
 
+## 0.3.3.2
+
+* Update dependency version bounds
+
 ## 0.3.3.1
 
 * Support for reflex-0.9.3
